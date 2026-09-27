@@ -224,6 +224,13 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
 
           seen.add(id);
 
+          if (widget.rideId != null && widget.rideId!.isNotEmpty) {
+            final rId = (map['rideId'] ?? map['id'] ?? map['_id'] ?? '').toString();
+            if (rId != widget.rideId && id != widget.rideId) continue;
+          } else if (widget.requestId != null && widget.requestId!.isNotEmpty) {
+            if (id != widget.requestId && map['requestId'] != widget.requestId) continue;
+          }
+
           final bool isPreselected = (widget.requestId != null &&
                   widget.requestId!.isNotEmpty &&
                   (id == widget.requestId ||

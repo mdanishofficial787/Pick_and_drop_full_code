@@ -14,12 +14,16 @@ class RideManagementScreen extends StatefulWidget {
   final String? driverId;
   final String driverName;
   final int initialTabIndex;
+  final String? filterPrefix;
+  final String? moduleName;
 
   const RideManagementScreen({
     super.key,
     this.driverId,
     this.driverName = 'ARBAB',
     this.initialTabIndex = 1,
+    this.filterPrefix,
+    this.moduleName,
   });
 
   @override
@@ -75,7 +79,8 @@ class _RideManagementScreenState extends State<RideManagementScreen>
   }
 
   void _initSocket() {
-    final activeDriverId = (widget.driverId != null && widget.driverId!.isNotEmpty)
+    final activeDriverId =
+        (widget.driverId != null && widget.driverId!.isNotEmpty)
         ? widget.driverId!
         : '';
 
@@ -84,7 +89,11 @@ class _RideManagementScreenState extends State<RideManagementScreen>
       'transports': ['websocket', 'polling'],
       'autoConnect': false,
     });
-    _bindSocketListeners(_socket, 'Dispatch Server ($kDispatchBaseUrl)', activeDriverId);
+    _bindSocketListeners(
+      _socket,
+      'Dispatch Server ($kDispatchBaseUrl)',
+      activeDriverId,
+    );
     _socket?.connect();
 
     // 2. Connect to local Backend Socket.IO instance if distinct
@@ -93,7 +102,11 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         'transports': ['websocket', 'polling'],
         'autoConnect': false,
       });
-      _bindSocketListeners(_backendSocket, 'Backend Server ($kBaseUrl)', activeDriverId);
+      _bindSocketListeners(
+        _backendSocket,
+        'Backend Server ($kBaseUrl)',
+        activeDriverId,
+      );
       _backendSocket?.connect();
     }
   }
@@ -106,7 +119,8 @@ class _RideManagementScreenState extends State<RideManagementScreen>
       final idsToJoin = {
         driverId,
         if (widget.driverName.isNotEmpty) widget.driverName,
-        if (widget.driverId != null && widget.driverId!.isNotEmpty) widget.driverId!,
+        if (widget.driverId != null && widget.driverId!.isNotEmpty)
+          widget.driverId!,
       };
 
       for (final id in idsToJoin) {
@@ -165,29 +179,64 @@ class _RideManagementScreenState extends State<RideManagementScreen>
     for (final event in assignEvents) {
       socket.on(event, (data) {
         debugPrint('[$label] Assignment event [$event]: $data');
-        
+
         Map<String, dynamic> payload = (data is Map)
             ? Map<String, dynamic>.from(data)
             : <String, dynamic>{};
-        if (payload['data'] is Map) payload = Map<String, dynamic>.from(payload['data']);
-        if (payload['ride'] is Map) payload = Map<String, dynamic>.from(payload['ride']);
-        if (payload['payload'] is Map) payload = Map<String, dynamic>.from(payload['payload']);
-        
-        final payloadDriverId = (payload['driverId'] ?? payload['driver'] ?? payload['assignedDriverId'] ?? '').toString();
-        final payloadDriverCode = (payload['driverCode'] ?? payload['driverReferenceId'] ?? '').toString();
-        final payloadDriverName = (payload['assignedDriver'] ?? payload['assignedDriverName'] ?? payload['driverName'] ?? '').toString();
-        
+        if (payload['data'] is Map) {
+          payload = Map<String, dynamic>.from(payload['data']);
+        }
+        if (payload['ride'] is Map) {
+          payload = Map<String, dynamic>.from(payload['ride']);
+        }
+        if (payload['payload'] is Map) {
+          payload = Map<String, dynamic>.from(payload['payload']);
+        }
+
+        final payloadDriverId =
+            (payload['driverId'] ??
+                    payload['driver'] ??
+                    payload['assignedDriverId'] ??
+                    '')
+                .toString();
+        final payloadDriverCode =
+            (payload['driverCode'] ?? payload['driverReferenceId'] ?? '')
+                .toString();
+        final payloadDriverName =
+            (payload['assignedDriver'] ??
+                    payload['assignedDriverName'] ??
+                    payload['driverName'] ??
+                    '')
+                .toString();
+
         final currentDriverId = driverId;
         final currentDriverName = widget.driverName;
-        
-        bool isForMe = false;
-        if (payloadDriverId.isNotEmpty && payloadDriverId == currentDriverId) isForMe = true;
-        if (payloadDriverName.isNotEmpty && payloadDriverName == currentDriverName) isForMe = true;
-        // Fallback for general unassigned broadcasts
-        if (payloadDriverId.isEmpty && payloadDriverName.isEmpty && payloadDriverCode.isEmpty) isForMe = true;
 
-        final status = (payload['status'] ?? payload['rawStatus'] ?? '').toString().toUpperCase();
-        final isAlreadyProcessed = ['ACCEPTED', 'STARTED', 'COMPLETED', 'CANCELLED', 'REJECTED'].contains(status);
+        bool isForMe = false;
+        if (payloadDriverId.isNotEmpty && payloadDriverId == currentDriverId) {
+          isForMe = true;
+        }
+        if (payloadDriverName.isNotEmpty &&
+            payloadDriverName == currentDriverName) {
+          isForMe = true;
+        }
+        // Fallback for general unassigned broadcasts
+        if (payloadDriverId.isEmpty &&
+            payloadDriverName.isEmpty &&
+            payloadDriverCode.isEmpty) {
+          isForMe = true;
+        }
+
+        final status = (payload['status'] ?? payload['rawStatus'] ?? '')
+            .toString()
+            .toUpperCase();
+        final isAlreadyProcessed = [
+          'ACCEPTED',
+          'STARTED',
+          'COMPLETED',
+          'CANCELLED',
+          'REJECTED',
+        ].contains(status);
 
         if (isForMe && mounted) {
           if (!isAlreadyProcessed) {
@@ -198,7 +247,9 @@ class _RideManagementScreenState extends State<RideManagementScreen>
       });
     }
 
-    socket.onDisconnect((_) => debugPrint('Disconnected from Socket.IO: $label'));
+    socket.onDisconnect(
+      (_) => debugPrint('Disconnected from Socket.IO: $label'),
+    );
   }
 
   /// Displays real-time incoming ride notification / modal pop-up on the driver's screen
@@ -213,46 +264,53 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         : <String, dynamic>{};
     if (data['data'] is Map) data = Map<String, dynamic>.from(data['data']);
     if (data['ride'] is Map) data = Map<String, dynamic>.from(data['ride']);
-    if (data['payload'] is Map) data = Map<String, dynamic>.from(data['payload']);
+    if (data['payload'] is Map) {
+      data = Map<String, dynamic>.from(data['payload']);
+    }
 
-    final reqId = (data['requestId'] ??
-            data['rideId'] ??
-            data['ride']?['requestId'] ??
-            data['_id'] ??
-            data['id'] ??
-            'REQ-NEW')
-        .toString();
+    final reqId =
+        (data['requestId'] ??
+                data['rideId'] ??
+                data['ride']?['requestId'] ??
+                data['_id'] ??
+                data['id'] ??
+                'REQ-NEW')
+            .toString();
 
-    final passName = (data['passengerName'] ??
-            data['customerName'] ??
-            data['ride']?['passengerName'] ??
-            data['passenger']?['name'] ??
-            data['customer']?['fullName'] ??
-            'Customer')
-        .toString();
+    final passName =
+        (data['passengerName'] ??
+                data['customerName'] ??
+                data['ride']?['passengerName'] ??
+                data['passenger']?['name'] ??
+                data['customer']?['fullName'] ??
+                'Customer')
+            .toString();
 
-    final passPhone = (data['passengerPhone'] ??
-            data['customerPhone'] ??
-            data['phone'] ??
-            data['PhoneNumber'] ??
-            data['userPhone'] ??
-            data['ride']?['passengerPhone'] ??
-            '')
-        .toString();
+    final passPhone =
+        (data['passengerPhone'] ??
+                data['customerPhone'] ??
+                data['phone'] ??
+                data['PhoneNumber'] ??
+                data['userPhone'] ??
+                data['ride']?['passengerPhone'] ??
+                '')
+            .toString();
 
-    final pickup = (data['pickupLocation'] is Map
+    final pickup =
+        (data['pickupLocation'] is Map
             ? data['pickupLocation']['address']?.toString()
             : (data['pickupLocation']?.toString() ??
-                data['ride']?['pickupLocation']?.toString() ??
-                'Pickup Location')) ??
+                  data['ride']?['pickupLocation']?.toString() ??
+                  'Pickup Location')) ??
         '';
 
-    final dropoff = (data['dropoffLocation'] is Map
+    final dropoff =
+        (data['dropoffLocation'] is Map
             ? data['dropoffLocation']['address']?.toString()
             : (data['dropoffLocation']?.toString() ??
-                data['dropLocation']?.toString() ??
-                data['ride']?['dropoffLocation']?.toString() ??
-                'Drop-off Location')) ??
+                  data['dropLocation']?.toString() ??
+                  data['ride']?['dropoffLocation']?.toString() ??
+                  'Drop-off Location')) ??
         '';
 
     final rawFare = RideInfo.extractRawFare(data);
@@ -287,12 +345,22 @@ class _RideManagementScreenState extends State<RideManagementScreen>
       phone: passPhone,
       pickup: pickup,
       drop: dropoff,
-      date: (data['date'] ?? data['startingFrom'] ?? data['startDate'] ?? data['travelDate'] ?? 'Today').toString(),
-      scheduledTime: (data['scheduledTime'] ?? data['timeToLeave'] ?? 'ASAP').toString(),
+      date:
+          (data['date'] ??
+                  data['startingFrom'] ??
+                  data['startDate'] ??
+                  data['travelDate'] ??
+                  'Today')
+              .toString(),
+      scheduledTime: (data['scheduledTime'] ?? data['timeToLeave'] ?? 'ASAP')
+          .toString(),
       fare: fareStr,
-      status: (data['status'] ?? data['rawStatus'] ?? 'ASSIGNED').toString().toUpperCase(),
+      status: (data['status'] ?? data['rawStatus'] ?? 'ASSIGNED')
+          .toString()
+          .toUpperCase(),
       assignedDriver: (data['assignedDriver'] ?? widget.driverName).toString(),
-      assignedDriverId: (data['assignedDriverId'] ?? widget.driverId ?? '').toString(),
+      assignedDriverId: (data['assignedDriverId'] ?? widget.driverId ?? '')
+          .toString(),
     );
 
     _socketReceivedRideIds.add(reqId);
@@ -312,7 +380,7 @@ class _RideManagementScreenState extends State<RideManagementScreen>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: moduleColor.withValues(alpha:0.1),
+                color: moduleColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(moduleIcon, color: moduleColor, size: 24),
@@ -353,7 +421,7 @@ class _RideManagementScreenState extends State<RideManagementScreen>
               children: [
                 CircleAvatar(
                   radius: 16,
-                  backgroundColor: moduleColor.withValues(alpha:0.1),
+                  backgroundColor: moduleColor.withValues(alpha: 0.1),
                   child: Icon(Icons.person, size: 18, color: moduleColor),
                 ),
                 const SizedBox(width: 8),
@@ -401,24 +469,62 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                       children: [
                         Icon(Icons.circle, size: 10, color: moduleColor),
                         const SizedBox(width: 8),
-                        Expanded(child: Text(pickup.isNotEmpty ? pickup : 'Pickup Address', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: const Color(0xFF374151)))),
+                        Expanded(
+                          child: Text(
+                            pickup.isNotEmpty ? pickup : 'Pickup Address',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: const Color(0xFF374151),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
-                    Padding(padding: const EdgeInsets.only(left: 4), child: Container(width: 2, height: 16, color: Colors.grey.shade300)),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Container(
+                        width: 2,
+                        height: 16,
+                        color: Colors.grey.shade300,
+                      ),
+                    ),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.location_on, size: 12, color: Color(0xFFDC2626)),
+                        const Icon(
+                          Icons.location_on,
+                          size: 12,
+                          color: Color(0xFFDC2626),
+                        ),
                         const SizedBox(width: 6),
-                        Expanded(child: Text(dropoff.isNotEmpty ? dropoff : 'Drop-off Address', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: const Color(0xFF374151)))),
+                        Expanded(
+                          child: Text(
+                            dropoff.isNotEmpty ? dropoff : 'Drop-off Address',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: const Color(0xFF374151),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ],
                   if (reqId.startsWith('SCH-')) ...[
                     const Divider(),
-                    Text('Type: ${data["rideType"] ?? "One Way"}', style: GoogleFonts.inter(fontSize: 12)),
-                    Text('Start: ${data["startingFrom"] ?? "N/A"}', style: GoogleFonts.inter(fontSize: 12)),
-                    Text('Time: ${data["timeToReach"] ?? "N/A"}', style: GoogleFonts.inter(fontSize: 12)),
+                    Text(
+                      'Type: ${data["rideType"] ?? "One Way"}',
+                      style: GoogleFonts.inter(fontSize: 12),
+                    ),
+                    Text(
+                      'Start: ${data["startingFrom"] ?? "N/A"}',
+                      style: GoogleFonts.inter(fontSize: 12),
+                    ),
+                    Text(
+                      'Time: ${data["timeToReach"] ?? "N/A"}',
+                      style: GoogleFonts.inter(fontSize: 12),
+                    ),
                   ],
                   if (reqId.startsWith('TT-')) ...[
                     Row(
@@ -426,18 +532,45 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                       children: [
                         Icon(Icons.circle, size: 10, color: moduleColor),
                         const SizedBox(width: 8),
-                        Expanded(child: Text(pickup.isNotEmpty ? pickup : 'Pickup Address', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: const Color(0xFF374151)))),
+                        Expanded(
+                          child: Text(
+                            pickup.isNotEmpty ? pickup : 'Pickup Address',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: const Color(0xFF374151),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                     const Divider(),
-                    Text('Travel Date: ${data["travelDate"] ?? "N/A"}', style: GoogleFonts.inter(fontSize: 12)),
-                    Text('Return Date: ${data["returnDate"] ?? "N/A"}', style: GoogleFonts.inter(fontSize: 12)),
-                    Text('Passengers: ${data["passengersCount"] ?? "N/A"}', style: GoogleFonts.inter(fontSize: 12)),
+                    Text(
+                      'Travel Date: ${data["travelDate"] ?? "N/A"}',
+                      style: GoogleFonts.inter(fontSize: 12),
+                    ),
+                    Text(
+                      'Return Date: ${data["returnDate"] ?? "N/A"}',
+                      style: GoogleFonts.inter(fontSize: 12),
+                    ),
+                    Text(
+                      'Passengers: ${data["passengersCount"] ?? "N/A"}',
+                      style: GoogleFonts.inter(fontSize: 12),
+                    ),
                   ],
                   if (reqId.startsWith('HDR-')) ...[
-                    Text('Start Date: ${data["startDate"] ?? "N/A"}', style: GoogleFonts.inter(fontSize: 12)),
-                    Text('End Date: ${data["endDate"] ?? "N/A"}', style: GoogleFonts.inter(fontSize: 12)),
-                    Text('Duration: ${data["duration"] ?? "N/A"}', style: GoogleFonts.inter(fontSize: 12)),
+                    Text(
+                      'Start Date: ${data["startDate"] ?? "N/A"}',
+                      style: GoogleFonts.inter(fontSize: 12),
+                    ),
+                    Text(
+                      'End Date: ${data["endDate"] ?? "N/A"}',
+                      style: GoogleFonts.inter(fontSize: 12),
+                    ),
+                    Text(
+                      'Duration: ${data["duration"] ?? "N/A"}',
+                      style: GoogleFonts.inter(fontSize: 12),
+                    ),
                   ],
                 ],
               ),
@@ -455,8 +588,22 @@ class _RideManagementScreenState extends State<RideManagementScreen>
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Trip Fare', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF15803D))),
-                  Text(fareStr, style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: const Color(0xFF15803D))),
+                  Text(
+                    'Trip Fare',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF15803D),
+                    ),
+                  ),
+                  Text(
+                    fareStr,
+                    style: GoogleFonts.inter(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF15803D),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -476,7 +623,9 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                     foregroundColor: const Color(0xFFDC2626),
                     side: const BorderSide(color: Color(0xFFDC2626)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                   child: const Text('Decline'),
                 ),
@@ -487,7 +636,11 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                 child: ElevatedButton.icon(
                   onPressed: () {
                     Navigator.of(ctx).pop();
-                    _updateRideStatus(incomingRide.id, 'ACCEPTED', ride: incomingRide);
+                    _updateRideStatus(
+                      incomingRide.id,
+                      'ACCEPTED',
+                      ride: incomingRide,
+                    );
                   },
                   icon: const Icon(Icons.check_rounded, size: 18),
                   label: const Text('Accept Ride'),
@@ -496,7 +649,9 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     elevation: 0,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                 ),
               ),
@@ -515,16 +670,17 @@ class _RideManagementScreenState extends State<RideManagementScreen>
     dynamic rawFare;
 
     if (data is Map) {
-      targetRideId = (data['rideId'] ??
-              data['_id'] ??
-              data['id'] ??
-              data['requestId'] ??
-              data['ride']?['_id'] ??
-              data['ride']?['id'] ??
-              data['ride']?['rideId'] ??
-              data['data']?['rideId'] ??
-              data['data']?['_id'])
-          ?.toString();
+      targetRideId =
+          (data['rideId'] ??
+                  data['_id'] ??
+                  data['id'] ??
+                  data['requestId'] ??
+                  data['ride']?['_id'] ??
+                  data['ride']?['id'] ??
+                  data['ride']?['rideId'] ??
+                  data['data']?['rideId'] ??
+                  data['data']?['_id'])
+              ?.toString();
 
       rawFare = RideInfo.extractRawFare(data);
     }
@@ -569,8 +725,11 @@ class _RideManagementScreenState extends State<RideManagementScreen>
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.price_change_outlined,
-                    color: Colors.white, size: 20),
+                const Icon(
+                  Icons.price_change_outlined,
+                  color: Colors.white,
+                  size: 20,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -588,7 +747,8 @@ class _RideManagementScreenState extends State<RideManagementScreen>
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 4),
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         );
       } else {
@@ -624,15 +784,17 @@ class _RideManagementScreenState extends State<RideManagementScreen>
               for (int i = 0; i < _newRequests.length; i++) {
                 if (_newRequests[i].id == rideId ||
                     _newRequests[i].requestId == rideId) {
-                  _newRequests[i] =
-                      _newRequests[i].copyWith(fare: formattedFare);
+                  _newRequests[i] = _newRequests[i].copyWith(
+                    fare: formattedFare,
+                  );
                 }
               }
               for (int i = 0; i < _assignedRides.length; i++) {
                 if (_assignedRides[i].id == rideId ||
                     _assignedRides[i].requestId == rideId) {
-                  _assignedRides[i] =
-                      _assignedRides[i].copyWith(fare: formattedFare);
+                  _assignedRides[i] = _assignedRides[i].copyWith(
+                    fare: formattedFare,
+                  );
                 }
               }
             });
@@ -676,31 +838,28 @@ class _RideManagementScreenState extends State<RideManagementScreen>
 
       final activeDriverId =
           (widget.driverId != null && widget.driverId!.isNotEmpty)
-              ? widget.driverId!
-              : '';
+          ? widget.driverId!
+          : '';
 
       // 1. Primary: GET /api/rides?status=assigned
       try {
+        final uri = Uri.parse('$kBaseUrl/api/rides?status=assigned');
         final response = await http
-            .get(
-              Uri.parse('$kBaseUrl/api/rides?status=assigned'),
-            )
+            .get(uri)
             .timeout(const Duration(seconds: 12));
         if (response.statusCode == 200) {
           final body = jsonDecode(response.body);
           combinedRawList.addAll(parseRidesPayload(body));
         }
       } catch (e) {
-        debugPrint("Fetch /api/rides?status=assigned error: $e");
+        debugPrint("Fetch primary assigned rides error: $e");
       }
 
       // 2. Specific Driver GET /api/rides/driver/{driverId}
       if (combinedRawList.isEmpty) {
         try {
           final response = await http
-              .get(
-                Uri.parse('$kBaseUrl/api/rides/driver/$activeDriverId'),
-              )
+              .get(Uri.parse('$kBaseUrl/api/rides/driver/$activeDriverId'))
               .timeout(const Duration(seconds: 12));
           if (response.statusCode == 200) {
             final body = jsonDecode(response.body);
@@ -713,9 +872,7 @@ class _RideManagementScreenState extends State<RideManagementScreen>
       if (combinedRawList.isEmpty) {
         try {
           final response = await http
-              .get(
-                Uri.parse('$kBaseUrl/api/rides'),
-              )
+              .get(Uri.parse('$kBaseUrl/api/rides'))
               .timeout(const Duration(seconds: 12));
           if (response.statusCode == 200) {
             final body = jsonDecode(response.body);
@@ -726,13 +883,11 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         }
       }
 
-      // 4. Fallback: GET /api/requests if /api/rides returned empty
+      // 4. Fallback: GET /api/requests if everything returned empty
       if (combinedRawList.isEmpty) {
         try {
           final response = await http
-              .get(
-                Uri.parse('$kBaseUrl/api/requests'),
-              )
+              .get(Uri.parse('$kBaseUrl/api/requests'))
               .timeout(const Duration(seconds: 12));
           if (response.statusCode == 200) {
             final body = jsonDecode(response.body);
@@ -747,9 +902,7 @@ class _RideManagementScreenState extends State<RideManagementScreen>
       if (combinedRawList.isEmpty && kDispatchBaseUrl != kBaseUrl) {
         try {
           final response = await http
-              .get(
-                Uri.parse('$kDispatchBaseUrl/api/rides?status=assigned'),
-              )
+              .get(Uri.parse('$kDispatchBaseUrl/api/rides?status=assigned'))
               .timeout(const Duration(seconds: 12));
           if (response.statusCode == 200) {
             final body = jsonDecode(response.body);
@@ -762,41 +915,90 @@ class _RideManagementScreenState extends State<RideManagementScreen>
 
       // Filter array to only display trips belonging to this logged-in driver
       final knownDriverNames = {
-        if (widget.driverName.isNotEmpty) widget.driverName.trim().toLowerCase(),
+        if (widget.driverName.isNotEmpty)
+          widget.driverName.trim().toLowerCase(),
       };
 
       final knownDriverIds = {
-        if (widget.driverId != null && widget.driverId!.isNotEmpty) widget.driverId!.trim().toLowerCase(),
+        if (widget.driverId != null && widget.driverId!.isNotEmpty)
+          widget.driverId!.trim().toLowerCase(),
       };
 
       final filteredRawList = combinedRawList.where((raw) {
         if (raw is! Map) return false;
         final ride = Map<String, dynamic>.from(raw);
 
-        final reqId = (ride['requestId'] ?? ride['id'] ?? ride['_id'] ?? '').toString();
-        if (reqId.isNotEmpty && _socketReceivedRideIds.contains(reqId)) return true;
+        final reqId = (ride['requestId'] ?? ride['id'] ?? ride['_id'] ?? '')
+            .toString();
 
-        final asgDriver = (ride['assignedDriver'] ?? ride['assignedDriverName'] ?? '').toString().trim().toLowerCase();
-        final asgDriverName = (ride['assignedDriverName'] ?? '').toString().trim().toLowerCase();
-        final asgDriverId = (ride['assignedDriverId'] ?? ride['driverId'] ?? ride['driver'] ?? '').toString().trim().toLowerCase();
-        final rideDriverId = (ride['driverId'] ?? '').toString().trim().toLowerCase();
-        final rideDriver = (ride['driver'] ?? '').toString().trim().toLowerCase();
+        if (widget.filterPrefix != null && widget.filterPrefix!.isNotEmpty) {
+          if (!reqId.startsWith(widget.filterPrefix!)) return false;
+        }
 
-        final driverNameMatch = knownDriverNames.any((k) =>
-            (asgDriver.isNotEmpty && (asgDriver == k || asgDriver.contains(k) || k.contains(asgDriver))) ||
-            (asgDriverName.isNotEmpty && (asgDriverName == k || asgDriverName.contains(k) || k.contains(asgDriverName))));
+        if (reqId.isNotEmpty && _socketReceivedRideIds.contains(reqId)) {
+          return true;
+        }
 
-        final driverIdMatch = knownDriverIds.any((k) =>
-            (asgDriverId.isNotEmpty && (asgDriverId == k || asgDriverId.contains(k) || k.contains(asgDriverId))) ||
-            (rideDriverId.isNotEmpty && (rideDriverId == k || rideDriverId.contains(k) || k.contains(rideDriverId))) ||
-            (rideDriver.isNotEmpty && (rideDriver == k || rideDriver.contains(k) || k.contains(rideDriver))));
+        final asgDriver =
+            (ride['assignedDriver'] ?? ride['assignedDriverName'] ?? '')
+                .toString()
+                .trim()
+                .toLowerCase();
+        final asgDriverName = (ride['assignedDriverName'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        final asgDriverId =
+            (ride['assignedDriverId'] ??
+                    ride['driverId'] ??
+                    ride['driver'] ??
+                    '')
+                .toString()
+                .trim()
+                .toLowerCase();
+        final rideDriverId = (ride['driverId'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        final rideDriver = (ride['driver'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+
+        final driverNameMatch = knownDriverNames.any(
+          (k) =>
+              (asgDriver.isNotEmpty &&
+                  (asgDriver == k ||
+                      asgDriver.contains(k) ||
+                      k.contains(asgDriver))) ||
+              (asgDriverName.isNotEmpty &&
+                  (asgDriverName == k ||
+                      asgDriverName.contains(k) ||
+                      k.contains(asgDriverName))),
+        );
+
+        final driverIdMatch = knownDriverIds.any(
+          (k) =>
+              (asgDriverId.isNotEmpty &&
+                  (asgDriverId == k ||
+                      asgDriverId.contains(k) ||
+                      k.contains(asgDriverId))) ||
+              (rideDriverId.isNotEmpty &&
+                  (rideDriverId == k ||
+                      rideDriverId.contains(k) ||
+                      k.contains(rideDriverId))) ||
+              (rideDriver.isNotEmpty &&
+                  (rideDriver == k ||
+                      rideDriver.contains(k) ||
+                      k.contains(rideDriver))),
+        );
 
         return driverNameMatch || driverIdMatch;
       }).toList();
 
       // Merge all newly fetched rides into the persistent cache and remove stale ones
       final Map<String, RideInfo> nextCache = {};
-      
+
       for (final r in filteredRawList) {
         if (r is Map) {
           try {
@@ -805,19 +1007,32 @@ class _RideManagementScreenState extends State<RideManagementScreen>
             final key = ride.requestId.isNotEmpty ? ride.requestId : ride.id;
             if (key.isNotEmpty) {
               final existing = _allRidesCache[key];
-              if (existing != null && (ride.name == 'Customer' || ride.pickup == 'Pickup Location')) {
+              if (existing != null &&
+                  (ride.name == 'Customer' ||
+                      ride.pickup == 'Pickup Location')) {
                 nextCache[key] = ride.copyWith(
                   name: existing.name != 'Customer' ? existing.name : ride.name,
-                  phone: existing.phone.isNotEmpty ? existing.phone : ride.phone,
-                  pickup: existing.pickup != 'Pickup Location' ? existing.pickup : ride.pickup,
-                  drop: existing.drop != 'Drop-off Location' ? existing.drop : ride.drop,
-                  fare: (existing.fare.isNotEmpty && existing.fare != 'Rs. 9,500') ? existing.fare : ride.fare,
+                  phone: existing.phone.isNotEmpty
+                      ? existing.phone
+                      : ride.phone,
+                  pickup: existing.pickup != 'Pickup Location'
+                      ? existing.pickup
+                      : ride.pickup,
+                  drop: existing.drop != 'Drop-off Location'
+                      ? existing.drop
+                      : ride.drop,
+                  fare:
+                      (existing.fare.isNotEmpty && existing.fare != 'Rs. 9,500')
+                      ? existing.fare
+                      : ride.fare,
                 );
               } else {
                 nextCache[key] = ride;
               }
               if (ride.id.isNotEmpty) nextCache[ride.id] = nextCache[key]!;
-              if (ride.requestId.isNotEmpty) nextCache[ride.requestId] = nextCache[key]!;
+              if (ride.requestId.isNotEmpty) {
+                nextCache[ride.requestId] = nextCache[key]!;
+              }
             }
           } catch (pe) {
             debugPrint("Error parsing individual ride: $pe");
@@ -840,74 +1055,93 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         }
       }
 
-      setState(() {
-        // Filter out any ride that was locally rejected, completed/cancelled, or is an empty ghost record
-        final activeRides = uniqueRides.where((r) {
-          final isLocallyRejected = _locallyRejectedRideIds.contains(r.id) ||
-              _locallyRejectedRideIds.contains(r.requestId);
-          final isTerminal = r.status == 'REJECTED' ||
-              r.status == 'CANCELLED' ||
-              r.status == 'COMPLETED';
-          final isGhost = (r.pickup.isEmpty || r.pickup == 'N/A') &&
-              (r.drop.isEmpty || r.drop == 'N/A') &&
-              (r.name == 'Customer' || r.name.isEmpty) &&
-              r.phone.isEmpty;
-          return !isLocallyRejected && !isTerminal && !isGhost;
-        }).toList();
+      if (mounted) {
+        setState(() {
+          // Filter out any ride that was locally rejected, completed/cancelled, or is an empty ghost record
+          final activeRides = uniqueRides.where((r) {
+            final isLocallyRejected =
+                _locallyRejectedRideIds.contains(r.id) ||
+                _locallyRejectedRideIds.contains(r.requestId);
+            final isTerminal =
+                r.status == 'REJECTED' ||
+                r.status == 'CANCELLED' ||
+                r.status == 'COMPLETED';
+            final isGhost =
+                (r.pickup.isEmpty || r.pickup == 'N/A') &&
+                (r.drop.isEmpty || r.drop == 'N/A') &&
+                (r.name == 'Customer' || r.name.isEmpty) &&
+                r.phone.isEmpty;
+            return !isLocallyRejected && !isTerminal && !isGhost;
+          }).toList();
 
-        // Apply local accepted / started status overrides
-        final List<RideInfo> processedRides = activeRides.map((r) {
-          if (_locallyAcceptedRides.containsKey(r.id)) {
-            return r.copyWith(status: _locallyAcceptedRides[r.id]!.status);
+          // Apply local accepted / started status overrides
+          final List<RideInfo> processedRides = activeRides.map((r) {
+            if (_locallyAcceptedRides.containsKey(r.id)) {
+              return r.copyWith(status: _locallyAcceptedRides[r.id]!.status);
+            }
+            if (r.requestId.isNotEmpty &&
+                _locallyAcceptedRides.containsKey(r.requestId)) {
+              return r.copyWith(
+                status: _locallyAcceptedRides[r.requestId]!.status,
+              );
+            }
+            return r;
+          }).toList();
+
+          // Ensure any locally accepted rides are included in the list
+          for (final localRide in _locallyAcceptedRides.values) {
+            if (widget.filterPrefix != null &&
+                widget.filterPrefix!.isNotEmpty) {
+              final rId = localRide.requestId.isNotEmpty
+                  ? localRide.requestId
+                  : localRide.id;
+              if (!rId.startsWith(widget.filterPrefix!)) continue;
+            }
+
+            final exists = processedRides.any(
+              (r) =>
+                  r.id == localRide.id ||
+                  (r.requestId.isNotEmpty &&
+                      r.requestId == localRide.requestId),
+            );
+            if (!exists &&
+                !_locallyRejectedRideIds.contains(localRide.id) &&
+                !_locallyRejectedRideIds.contains(localRide.requestId) &&
+                localRide.status != 'COMPLETED' &&
+                localRide.status != 'CANCELLED') {
+              processedRides.insert(0, localRide);
+            }
           }
-          if (r.requestId.isNotEmpty &&
-              _locallyAcceptedRides.containsKey(r.requestId)) {
-            return r.copyWith(
-                status: _locallyAcceptedRides[r.requestId]!.status);
-          }
-          return r;
-        }).toList();
 
-        // Ensure any locally accepted rides are included in the list
-        for (final localRide in _locallyAcceptedRides.values) {
-          final exists = processedRides.any((r) =>
-              r.id == localRide.id ||
-              (r.requestId.isNotEmpty && r.requestId == localRide.requestId));
-          if (!exists &&
-              !_locallyRejectedRideIds.contains(localRide.id) &&
-              !_locallyRejectedRideIds.contains(localRide.requestId) &&
-              localRide.status != 'COMPLETED' &&
-              localRide.status != 'CANCELLED') {
-            processedRides.insert(0, localRide);
-          }
-        }
+          // Requests tab: incoming rides waiting for driver acceptance
+          _newRequests = processedRides.where((r) {
+            final s = r.status.toUpperCase();
+            return s == 'PENDING DISPATCH' ||
+                s == 'PENDING' ||
+                s == 'ASSIGNED' ||
+                s == 'AWAITING DRIVER ACCEPTANCE' ||
+                s == 'DISPATCHED' ||
+                s == 'WAITING FOR DRIVER';
+          }).toList();
 
-        // Requests tab: incoming rides waiting for driver acceptance
-        _newRequests = processedRides.where((r) {
-          final s = r.status.toUpperCase();
-          return s == 'PENDING DISPATCH' ||
-              s == 'PENDING' ||
-              s == 'ASSIGNED' ||
-              s == 'AWAITING DRIVER ACCEPTANCE' ||
-              s == 'DISPATCHED' ||
-              s == 'WAITING FOR DRIVER';
-        }).toList();
-
-        // Assigned tab: rides that driver has ACCEPTED or STARTED
-        _assignedRides = processedRides
-            .where(
-                (r) => r.status == 'ACCEPTED' || r.status == 'STARTED')
-            .toList();
-        _isLoading = false;
-      });
+          // Assigned tab: rides that driver has ACCEPTED or STARTED
+          _assignedRides = processedRides
+              .where((r) => r.status == 'ACCEPTED' || r.status == 'STARTED')
+              .toList();
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       debugPrint("Error fetching rides: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _updateRideStatus(String rideId, String newStatus,
-      {RideInfo? ride}) async {
+  Future<void> _updateRideStatus(
+    String rideId,
+    String newStatus, {
+    RideInfo? ride,
+  }) async {
     RideInfo? targetRide = ride;
     if (targetRide == null) {
       for (final r in _newRequests) {
@@ -941,29 +1175,35 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         if (targetRide != null && targetRide.requestId.isNotEmpty) {
           _allRidesCache.remove(targetRide.requestId);
         }
-        _newRequests.removeWhere((r) => r.id == rideId || r.requestId == rideId);
-        _assignedRides.removeWhere((r) => r.id == rideId || r.requestId == rideId);
+        _newRequests.removeWhere(
+          (r) => r.id == rideId || r.requestId == rideId,
+        );
+        _assignedRides.removeWhere(
+          (r) => r.id == rideId || r.requestId == rideId,
+        );
       } else if (newStatus == 'ACCEPTED') {
-        final existingFare = (targetRide != null &&
+        final existingFare =
+            (targetRide != null &&
                 targetRide.fare.isNotEmpty &&
                 targetRide.fare != 'Rs. 0')
             ? targetRide.fare
             : 'Rs. 9,500';
 
-        final acceptedRide = (targetRide ??
-                RideInfo(
-                  id: rideId,
-                  requestId: rideId,
-                  name: 'Customer',
-                  phone: '',
-                  pickup: '',
-                  drop: '',
-                  date: '',
-                  scheduledTime: '',
-                  fare: existingFare,
-                  status: 'ACCEPTED',
-                ))
-            .copyWith(status: 'ACCEPTED', fare: existingFare);
+        final acceptedRide =
+            (targetRide ??
+                    RideInfo(
+                      id: rideId,
+                      requestId: rideId,
+                      name: 'Customer',
+                      phone: '',
+                      pickup: '',
+                      drop: '',
+                      date: '',
+                      scheduledTime: '',
+                      fare: existingFare,
+                      status: 'ACCEPTED',
+                    ))
+                .copyWith(status: 'ACCEPTED', fare: existingFare);
 
         _locallyAcceptedRides[rideId] = acceptedRide;
         if (acceptedRide.id.isNotEmpty) {
@@ -974,38 +1214,57 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         }
 
         _allRidesCache[rideId] = acceptedRide;
-        if (acceptedRide.id.isNotEmpty) _allRidesCache[acceptedRide.id] = acceptedRide;
-        if (acceptedRide.requestId.isNotEmpty) _allRidesCache[acceptedRide.requestId] = acceptedRide;
+        if (acceptedRide.id.isNotEmpty) {
+          _allRidesCache[acceptedRide.id] = acceptedRide;
+        }
+        if (acceptedRide.requestId.isNotEmpty) {
+          _allRidesCache[acceptedRide.requestId] = acceptedRide;
+        }
 
         // 1. Remove immediately from incoming requests
-        _newRequests.removeWhere((r) => r.id == rideId || r.requestId == rideId);
+        _newRequests.removeWhere(
+          (r) => r.id == rideId || r.requestId == rideId,
+        );
         // 2. Remove duplicate from assigned if any
-        _assignedRides.removeWhere((r) => r.id == rideId || r.requestId == rideId);
+        _assignedRides.removeWhere(
+          (r) => r.id == rideId || r.requestId == rideId,
+        );
         // 3. Add to the top of assigned rides
-        _assignedRides.insert(0, acceptedRide);
+        bool shouldAdd = true;
+        if (widget.filterPrefix != null && widget.filterPrefix!.isNotEmpty) {
+          final rId = acceptedRide.requestId.isNotEmpty
+              ? acceptedRide.requestId
+              : acceptedRide.id;
+          if (!rId.startsWith(widget.filterPrefix!)) shouldAdd = false;
+        }
+        if (shouldAdd) {
+          _assignedRides.insert(0, acceptedRide);
+        }
         // 4. Immediately switch tab to Assigned (Tab 0)
         _tabController.animateTo(0);
       } else if (newStatus == 'STARTED') {
-        final existingFare = (targetRide != null &&
+        final existingFare =
+            (targetRide != null &&
                 targetRide.fare.isNotEmpty &&
                 targetRide.fare != 'Rs. 0')
             ? targetRide.fare
             : 'Rs. 9,500';
 
-        final startedRide = (targetRide ??
-                RideInfo(
-                  id: rideId,
-                  requestId: rideId,
-                  name: 'Customer',
-                  phone: '',
-                  pickup: '',
-                  drop: '',
-                  date: '',
-                  scheduledTime: '',
-                  fare: existingFare,
-                  status: 'STARTED',
-                ))
-            .copyWith(status: 'STARTED', fare: existingFare);
+        final startedRide =
+            (targetRide ??
+                    RideInfo(
+                      id: rideId,
+                      requestId: rideId,
+                      name: 'Customer',
+                      phone: '',
+                      pickup: '',
+                      drop: '',
+                      date: '',
+                      scheduledTime: '',
+                      fare: existingFare,
+                      status: 'STARTED',
+                    ))
+                .copyWith(status: 'STARTED', fare: existingFare);
 
         _locallyAcceptedRides[rideId] = startedRide;
         if (startedRide.id.isNotEmpty) {
@@ -1016,15 +1275,29 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         }
 
         _allRidesCache[rideId] = startedRide;
-        if (startedRide.id.isNotEmpty) _allRidesCache[startedRide.id] = startedRide;
-        if (startedRide.requestId.isNotEmpty) _allRidesCache[startedRide.requestId] = startedRide;
+        if (startedRide.id.isNotEmpty) {
+          _allRidesCache[startedRide.id] = startedRide;
+        }
+        if (startedRide.requestId.isNotEmpty) {
+          _allRidesCache[startedRide.requestId] = startedRide;
+        }
 
-        final idx = _assignedRides
-            .indexWhere((r) => r.id == rideId || r.requestId == rideId);
+        final idx = _assignedRides.indexWhere(
+          (r) => r.id == rideId || r.requestId == rideId,
+        );
         if (idx != -1) {
           _assignedRides[idx] = startedRide;
         } else {
-          _assignedRides.insert(0, startedRide);
+          bool shouldAdd = true;
+          if (widget.filterPrefix != null && widget.filterPrefix!.isNotEmpty) {
+            final rId = startedRide.requestId.isNotEmpty
+                ? startedRide.requestId
+                : startedRide.id;
+            if (!rId.startsWith(widget.filterPrefix!)) shouldAdd = false;
+          }
+          if (shouldAdd) {
+            _assignedRides.insert(0, startedRide);
+          }
         }
       } else if (newStatus == 'COMPLETED') {
         _locallyAcceptedRides.remove(rideId);
@@ -1035,15 +1308,18 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         if (targetRide != null && targetRide.requestId.isNotEmpty) {
           _allRidesCache.remove(targetRide.requestId);
         }
-        _assignedRides
-            .removeWhere((r) => r.id == rideId || r.requestId == rideId);
-        _newRequests
-            .removeWhere((r) => r.id == rideId || r.requestId == rideId);
+        _assignedRides.removeWhere(
+          (r) => r.id == rideId || r.requestId == rideId,
+        );
+        _newRequests.removeWhere(
+          (r) => r.id == rideId || r.requestId == rideId,
+        );
       }
     });
 
     try {
-      final currentDriverId = (widget.driverId != null && widget.driverId!.isNotEmpty)
+      final currentDriverId =
+          (widget.driverId != null && widget.driverId!.isNotEmpty)
           ? widget.driverId!
           : "6a97ba8860eec88e497bd6c7";
 
@@ -1073,57 +1349,60 @@ class _RideManagementScreenState extends State<RideManagementScreen>
       // 3. Also notify local backend if kDispatchBaseUrl != kBaseUrl
       if (kDispatchBaseUrl != kBaseUrl) {
         try {
-        final headers = {
-          'Content-Type': 'application/json',
-        };
+          final headers = {'Content-Type': 'application/json'};
 
-        final bodyData = jsonEncode({
-          'action': newStatus,
-          'driverId': widget.driverId,
-          'driverCode': widget.driverName,
-        });
+          final bodyData = jsonEncode({
+            'action': newStatus,
+            'driverId': widget.driverId,
+            'driverCode': widget.driverName,
+          });
 
-        // Determine correct endpoint based on prefix
-        String endpoint = '/api/rides/$rideId/driver-response';
-        String rId = targetRide?.requestId ?? rideId;
-        
-        if (rId.startsWith('REQ-')) {
-          endpoint = '/api/rides/$rideId/driver-response';
-        } else if (rId.startsWith('SCH-')) {
-          endpoint = '/api/schedule-rides/$rideId/driver-response';
-        } else if (rId.startsWith('TT-')) {
-          endpoint = '/api/travel-requests/$rideId/driver-response';
-        } else if (rId.startsWith('HDR-')) {
-          endpoint = '/api/driver-hire/$rideId/driver-response';
-        } else {
-          // Fallback legacy endpoint if no prefix
-          endpoint = '/api/rides/$rideId/driver-response';
-        }
+          // Determine correct endpoint based on prefix
+          String endpoint = '/api/rides/$rideId/driver-response';
+          String rId = targetRide?.requestId ?? rideId;
 
-        http.Response response = await http.patch(
-          Uri.parse('$kBaseUrl$endpoint'),
-          headers: headers,
-          body: bodyData,
-        );
+          if (rId.startsWith('REQ-')) {
+            endpoint = '/api/rides/$rideId/driver-response';
+          } else if (rId.startsWith('SCH-')) {
+            endpoint = '/api/schedule-rides/$rideId/driver-response';
+          } else if (rId.startsWith('TT-')) {
+            endpoint = '/api/travel-requests/$rideId/driver-response';
+          } else if (rId.startsWith('HDR-')) {
+            endpoint = '/api/driver-hire/$rideId/driver-response';
+          } else {
+            // Fallback legacy endpoint if no prefix
+            endpoint = '/api/rides/$rideId/driver-response';
+          }
 
-        if (response.statusCode != 200 && response.statusCode != 201 && kDispatchBaseUrl != kBaseUrl) {
-           response = await http.patch(
-            Uri.parse('$kDispatchBaseUrl$endpoint'),
+          http.Response response = await http.patch(
+            Uri.parse('$kBaseUrl$endpoint'),
             headers: headers,
             body: bodyData,
           );
-        }
 
-        if (response.statusCode != 200 && response.statusCode != 201) {
-          final errorMsg = jsonDecode(response.body)['message'] ?? 'Failed to update status';
-          throw Exception(errorMsg);
-        }
+          if (response.statusCode != 200 &&
+              response.statusCode != 201 &&
+              kDispatchBaseUrl != kBaseUrl) {
+            response = await http.patch(
+              Uri.parse('$kDispatchBaseUrl$endpoint'),
+              headers: headers,
+              body: bodyData,
+            );
+          }
+
+          if (response.statusCode != 200 && response.statusCode != 201) {
+            final errorMsg =
+                jsonDecode(response.body)['message'] ??
+                'Failed to update status';
+            throw Exception(errorMsg);
+          }
         } catch (e) {
           // ignore
         }
       }
       debugPrint(
-          "UPDATE RIDE STATUS [$newStatus]: ${response.statusCode} - ${response.body}");
+        "UPDATE RIDE STATUS [$newStatus]: ${response.statusCode} - ${response.body}",
+      );
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         await _fetchRides(silent: true);
@@ -1137,7 +1416,9 @@ class _RideManagementScreenState extends State<RideManagementScreen>
               content: Row(
                 children: [
                   Icon(
-                    isAccepted ? Icons.check_circle_outline : Icons.info_outline,
+                    isAccepted
+                        ? Icons.check_circle_outline
+                        : Icons.info_outline,
                     color: Colors.white,
                     size: 22,
                   ),
@@ -1147,7 +1428,10 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                       isAccepted
                           ? 'Ride Accepted! Your profile picture, phone & vehicle details have been shared with the customer.'
                           : 'Ride ${_statusLabel(newStatus)} successfully',
-                      style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600),
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -1155,7 +1439,8 @@ class _RideManagementScreenState extends State<RideManagementScreen>
               backgroundColor: _statusSnackColor(newStatus),
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+                borderRadius: BorderRadius.circular(10),
+              ),
               duration: Duration(seconds: isAccepted ? 4 : 2),
             ),
           );
@@ -1215,13 +1500,15 @@ class _RideManagementScreenState extends State<RideManagementScreen>
   }
 
   /// Shows a confirmation dialog before rejecting the customer's ride
-  Future<void> _confirmAndReject(RideInfo ride, {BuildContext? sheetContext}) async {
+  Future<void> _confirmAndReject(
+    RideInfo ride, {
+    BuildContext? sheetContext,
+  }) async {
     final confirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
             Container(
@@ -1230,15 +1517,17 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                 color: const Color(0xFFFEF2F2),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.cancel_outlined,
-                  color: Color(0xFFDC2626), size: 22),
+              child: const Icon(
+                Icons.cancel_outlined,
+                color: Color(0xFFDC2626),
+                size: 22,
+              ),
             ),
             const SizedBox(width: 10),
             const Expanded(
               child: Text(
                 'Reject Ride?',
-                style:
-                    TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
               ),
             ),
           ],
@@ -1250,7 +1539,9 @@ class _RideManagementScreenState extends State<RideManagementScreen>
             Text(
               'Are you sure you want to reject the ride request from:',
               style: GoogleFonts.inter(
-                  fontSize: 14, color: const Color(0xFF6B7280)),
+                fontSize: 14,
+                color: const Color(0xFF6B7280),
+              ),
             ),
             const SizedBox(height: 12),
             Container(
@@ -1266,23 +1557,27 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                   Text(
                     ride.name,
                     style: GoogleFonts.inter(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: const Color(0xFF111827)),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF111827),
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     ride.requestId,
                     style: GoogleFonts.inter(
-                        fontSize: 12, color: const Color(0xFF6B7280)),
+                      fontSize: 12,
+                      color: const Color(0xFF6B7280),
+                    ),
                   ),
                   if (ride.pickup.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Text(
                       '📍 ${ride.pickup}',
                       style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: const Color(0xFF374151)),
+                        fontSize: 12,
+                        color: const Color(0xFF374151),
+                      ),
                     ),
                   ],
                 ],
@@ -1292,9 +1587,10 @@ class _RideManagementScreenState extends State<RideManagementScreen>
             Text(
               'This action cannot be undone.',
               style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: const Color(0xFFDC2626),
-                  fontWeight: FontWeight.w500),
+                fontSize: 12,
+                color: const Color(0xFFDC2626),
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ],
         ),
@@ -1302,9 +1598,12 @@ class _RideManagementScreenState extends State<RideManagementScreen>
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
             style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF6B7280)),
-            child: Text('Cancel',
-                style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+              foregroundColor: const Color(0xFF6B7280),
+            ),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(true),
@@ -1312,11 +1611,14 @@ class _RideManagementScreenState extends State<RideManagementScreen>
               backgroundColor: const Color(0xFFDC2626),
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
+                borderRadius: BorderRadius.circular(8),
+              ),
               elevation: 0,
             ),
-            child: Text('Yes, Reject',
-                style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+            child: Text(
+              'Yes, Reject',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),
@@ -1327,7 +1629,9 @@ class _RideManagementScreenState extends State<RideManagementScreen>
       if (ride.requestId.isNotEmpty) {
         _locallyRejectedRideIds.add(ride.requestId);
       }
-      if (sheetContext != null && sheetContext.mounted && Navigator.of(sheetContext).canPop()) {
+      if (sheetContext != null &&
+          sheetContext.mounted &&
+          Navigator.of(sheetContext).canPop()) {
         Navigator.of(sheetContext).pop();
       }
       await _updateRideStatus(ride.id, 'REJECTED', ride: ride);
@@ -1352,7 +1656,7 @@ class _RideManagementScreenState extends State<RideManagementScreen>
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'Ride Management',
+          widget.moduleName ?? 'Ride Management',
           style: GoogleFonts.inter(
             fontSize: 18,
             fontWeight: FontWeight.w700,
@@ -1361,8 +1665,11 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh_rounded,
-                color: AppColors.textPrimary, size: 22),
+            icon: const Icon(
+              Icons.refresh_rounded,
+              color: AppColors.textPrimary,
+              size: 22,
+            ),
             tooltip: 'Refresh',
             onPressed: _fetchRides,
           ),
@@ -1409,7 +1716,9 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                             const SizedBox(width: 6),
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 1),
+                                horizontal: 6,
+                                vertical: 1,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.white.withValues(alpha: 0.3),
                                 borderRadius: BorderRadius.circular(10),
@@ -1417,8 +1726,9 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                               child: Text(
                                 '${_assignedRides.length}',
                                 style: GoogleFonts.inter(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                           ],
@@ -1434,7 +1744,9 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                             const SizedBox(width: 6),
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 1),
+                                horizontal: 6,
+                                vertical: 1,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.white.withValues(alpha: 0.3),
                                 borderRadius: BorderRadius.circular(10),
@@ -1442,8 +1754,9 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                               child: Text(
                                 '${_newRequests.length}',
                                 style: GoogleFonts.inter(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                           ],
@@ -1464,11 +1777,9 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                       controller: _tabController,
                       children: [
                         // Tab 1: Assigned Rides (Accepted/Started)
-                        _buildRidesList(_assignedRides,
-                            tabType: 'assigned'),
+                        _buildRidesList(_assignedRides, tabType: 'assigned'),
                         // Tab 2: New Requests (Assigned, awaiting driver response)
-                        _buildRidesList(_newRequests,
-                            tabType: 'requests'),
+                        _buildRidesList(_newRequests, tabType: 'requests'),
                       ],
                     ),
             ),
@@ -1478,8 +1789,7 @@ class _RideManagementScreenState extends State<RideManagementScreen>
     );
   }
 
-  Widget _buildRidesList(List<RideInfo> rides,
-      {required String tabType}) {
+  Widget _buildRidesList(List<RideInfo> rides, {required String tabType}) {
     if (rides.isEmpty) {
       return Center(
         child: Column(
@@ -1521,8 +1831,7 @@ class _RideManagementScreenState extends State<RideManagementScreen>
     return RefreshIndicator(
       onRefresh: _fetchRides,
       child: ListView.separated(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
         itemCount: rides.length,
         separatorBuilder: (_, index) => const SizedBox(height: 16),
         itemBuilder: (context, index) {
@@ -1611,8 +1920,11 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                         color: Color(0xFFE0E7FF),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.person_outline,
-                          color: Color(0xFF1959F6), size: 24),
+                      child: const Icon(
+                        Icons.person_outline,
+                        color: Color(0xFF1959F6),
+                        size: 24,
+                      ),
                     ),
                     const SizedBox(width: 12),
                     // Name
@@ -1630,12 +1942,15 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                     // Status badge
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
+                        horizontal: 10,
+                        vertical: 5,
+                      ),
                       decoration: BoxDecoration(
                         color: statusColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                            color: statusColor.withValues(alpha: 0.4)),
+                          color: statusColor.withValues(alpha: 0.4),
+                        ),
                       ),
                       child: Text(
                         statusLabel,
@@ -1685,7 +2000,8 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                                 MaterialPageRoute(
                                   builder: (_) => ReportIssueScreen(
                                     driverId: widget.driverId,
-                                    initialReason: 'Cannot Take Customer / Passenger Issue',
+                                    initialReason:
+                                        'Cannot Take Customer / Passenger Issue',
                                     customerName: ride.name,
                                     customerPhone: ride.phone,
                                     requestId: ride.requestId.isNotEmpty
@@ -1757,9 +2073,10 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                           ),
                         ),
                         Container(
-                            width: 2,
-                            height: 28,
-                            color: Colors.grey.shade300),
+                          width: 2,
+                          height: 28,
+                          color: Colors.grey.shade300,
+                        ),
                         Container(
                           width: 10,
                           height: 10,
@@ -1767,7 +2084,9 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                             color: Colors.white,
                             shape: BoxShape.circle,
                             border: Border.all(
-                                color: const Color(0xFFDC2626), width: 2),
+                              color: const Color(0xFFDC2626),
+                              width: 2,
+                            ),
                           ),
                         ),
                       ],
@@ -1821,8 +2140,6 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                 ),
               ),
 
-
-
               Divider(height: 1, color: Colors.grey.shade100),
 
               // ── ACTION BUTTONS ──
@@ -1832,8 +2149,7 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                     ? const Center(
                         child: Padding(
                           padding: EdgeInsets.symmetric(vertical: 8),
-                          child:
-                              CircularProgressIndicator(strokeWidth: 2),
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       )
                     : _buildActionButtons(ride, tabType),
@@ -1846,8 +2162,11 @@ class _RideManagementScreenState extends State<RideManagementScreen>
   }
 
   /// Displays detailed ride view in a modal bottom sheet with dynamic fare
-  Widget _buildActionButtons(RideInfo ride, String tabType,
-      {BuildContext? sheetContext}) {
+  Widget _buildActionButtons(
+    RideInfo ride,
+    String tabType, {
+    BuildContext? sheetContext,
+  }) {
     // ── REQUESTS TAB: New ride assigned / dispatched to driver ──
     // Driver can ACCEPT (move to assigned) or REJECT (decline the customer)
     if (tabType == 'requests') {
@@ -1859,15 +2178,20 @@ class _RideManagementScreenState extends State<RideManagementScreen>
               onPressed: () =>
                   _confirmAndReject(ride, sheetContext: sheetContext),
               icon: const Icon(Icons.close_rounded, size: 16),
-              label: Text('Reject',
-                  style: GoogleFonts.inter(
-                      fontSize: 14, fontWeight: FontWeight.w600)),
+              label: Text(
+                'Reject',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFFDC2626),
                 side: const BorderSide(color: Color(0xFFDC2626)),
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
             ),
           ),
@@ -1884,16 +2208,21 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                 _updateRideStatus(ride.id, 'ACCEPTED', ride: ride);
               },
               icon: const Icon(Icons.check_rounded, size: 18),
-              label: Text('Accept Ride',
-                  style: GoogleFonts.inter(
-                      fontSize: 14, fontWeight: FontWeight.w700)),
+              label: Text(
+                'Accept Ride',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF1959F6),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
             ),
           ),
@@ -1918,15 +2247,20 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                     _updateRideStatus(ride.id, 'CANCELLED', ride: ride);
                   },
                   icon: const Icon(Icons.cancel_outlined, size: 16),
-                  label: Text('Cancel Ride',
-                      style: GoogleFonts.inter(
-                          fontSize: 14, fontWeight: FontWeight.w600)),
+                  label: Text(
+                    'Cancel Ride',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFFDC2626),
                     side: const BorderSide(color: Color(0xFFDC2626)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                 ),
               ),
@@ -1935,20 +2269,24 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                 child: OutlinedButton.icon(
                   onPressed: () {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text('Opening Navigation...')),
+                      const SnackBar(content: Text('Opening Navigation...')),
                     );
                   },
                   icon: const Icon(Icons.navigation_outlined, size: 16),
-                  label: Text('Navigate',
-                      style: GoogleFonts.inter(
-                          fontSize: 14, fontWeight: FontWeight.w600)),
+                  label: Text(
+                    'Navigate',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFF1959F6),
                     side: const BorderSide(color: Color(0xFF1959F6)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                 ),
               ),
@@ -1966,17 +2304,21 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                 _updateRideStatus(ride.id, 'COMPLETED', ride: ride);
               },
               icon: const Icon(Icons.check_circle_outline, size: 18),
-              label: Text('Complete Trip',
-                  style: GoogleFonts.inter(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700)),
+              label: Text(
+                'Complete Trip',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF15803D),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
             ),
           ),
@@ -2037,7 +2379,8 @@ class RideInfo {
     if (data == null) return null;
     if (data is! Map) return data;
 
-    final direct = data['fare'] ??
+    final direct =
+        data['fare'] ??
         data['fareFormatted'] ??
         data['rawFare'] ??
         data['newFare'] ??
@@ -2072,7 +2415,8 @@ class RideInfo {
 
     for (final obj in nestedObjects) {
       if (obj is Map) {
-        final nested = obj['fare'] ??
+        final nested =
+            obj['fare'] ??
             obj['fareFormatted'] ??
             obj['rawFare'] ??
             obj['newFare'] ??
@@ -2198,7 +2542,14 @@ class RideInfo {
       if (raw == null) return '';
       if (raw is String) return raw.trim();
       if (raw is Map) {
-        final val = (raw['address'] ?? raw['name'] ?? raw['formattedAddress'] ?? raw['street'] ?? '').toString().trim();
+        final val =
+            (raw['address'] ??
+                    raw['name'] ??
+                    raw['formattedAddress'] ??
+                    raw['street'] ??
+                    '')
+                .toString()
+                .trim();
         if (val.isNotEmpty) return val;
       }
       return '';
@@ -2213,55 +2564,87 @@ class RideInfo {
     final d2 = extractAddr(json['dropoffLocation']);
     final d3 = extractAddr(json['drop']);
     final d4 = extractAddr(json['to']);
-    final drop = d1.isNotEmpty ? d1 : (d2.isNotEmpty ? d2 : (d3.isNotEmpty ? d3 : d4));
+    final drop = d1.isNotEmpty
+        ? d1
+        : (d2.isNotEmpty ? d2 : (d3.isNotEmpty ? d3 : d4));
 
     String custName = '';
-    if (json['passengerName'] != null && json['passengerName'].toString().trim().isNotEmpty) {
+    if (json['passengerName'] != null &&
+        json['passengerName'].toString().trim().isNotEmpty) {
       custName = json['passengerName'].toString().trim();
-    } else if (json['customerName'] != null && json['customerName'].toString().trim().isNotEmpty) {
+    } else if (json['customerName'] != null &&
+        json['customerName'].toString().trim().isNotEmpty) {
       custName = json['customerName'].toString().trim();
     } else if (json['passenger'] is Map && json['passenger']['name'] != null) {
       custName = json['passenger']['name'].toString().trim();
     } else if (json['customer'] is Map) {
-      custName = (json['customer']['fullName'] ?? json['customer']['Name'] ?? json['customer']['name'] ?? '').toString().trim();
-    } else if (json['customer'] is String && !RegExp(r'^[0-9a-fA-F]{24}$').hasMatch(json['customer'])) {
+      custName =
+          (json['customer']['fullName'] ??
+                  json['customer']['Name'] ??
+                  json['customer']['name'] ??
+                  '')
+              .toString()
+              .trim();
+    } else if (json['customer'] is String &&
+        !RegExp(r'^[0-9a-fA-F]{24}$').hasMatch(json['customer'])) {
       custName = json['customer'].toString().trim();
     }
     if (custName.isEmpty || custName.toLowerCase() == 'unknown') {
       custName = 'Customer';
     }
 
-    final custPhone = json['passengerPhone'] ??
+    final custPhone =
+        json['passengerPhone'] ??
         json['customerPhone'] ??
         json['phone'] ??
         json['PhoneNumber'] ??
-        (json['passenger'] is Map ? (json['passenger']['phone'] ?? json['passenger']['phoneNumber']) : null) ??
-        (json['customer'] is Map ? (json['customer']['PhoneNumber'] ?? json['customer']['phone']) : null) ??
+        (json['passenger'] is Map
+            ? (json['passenger']['phone'] ?? json['passenger']['phoneNumber'])
+            : null) ??
+        (json['customer'] is Map
+            ? (json['customer']['PhoneNumber'] ?? json['customer']['phone'])
+            : null) ??
         '';
 
-    final date = json['startingFrom'] ??
+    final date =
+        json['startingFrom'] ??
         json['date'] ??
-        (json['customSchedule'] is Map ? json['customSchedule']['startDate'] : null) ??
+        (json['customSchedule'] is Map
+            ? json['customSchedule']['startDate']
+            : null) ??
         '';
 
-    final schedType = (json['scheduleType'] ??
-        (json['customSchedule'] != null ? 'Custom Schedule' : (json['rideType'] ?? 'Monthly Pick & Drop'))).toString();
+    final schedType =
+        (json['scheduleType'] ??
+                (json['customSchedule'] != null
+                    ? 'Custom Schedule'
+                    : (json['rideType'] ?? 'Monthly Pick & Drop')))
+            .toString();
 
-    final pTime = (json['pickupTime'] ??
-        json['timeToReach'] ??
-        json['scheduleTime'] ??
-        json['scheduledTime'] ??
-        (json['customSchedule'] is Map ? json['customSchedule']['fromTime'] : null) ??
-        json['timeToLeave'] ??
-        '').toString();
+    final pTime =
+        (json['pickupTime'] ??
+                json['timeToReach'] ??
+                json['scheduleTime'] ??
+                json['scheduledTime'] ??
+                (json['customSchedule'] is Map
+                    ? json['customSchedule']['fromTime']
+                    : null) ??
+                json['timeToLeave'] ??
+                '')
+            .toString();
 
-    final dTime = (json['dropoffTime'] ??
-        json['timeToLeave'] ??
-        (json['customSchedule'] is Map ? json['customSchedule']['toTime'] : null) ??
-        '').toString();
+    final dTime =
+        (json['dropoffTime'] ??
+                json['timeToLeave'] ??
+                (json['customSchedule'] is Map
+                    ? json['customSchedule']['toTime']
+                    : null) ??
+                '')
+            .toString();
 
     String daysStr = '';
-    if (json['customSchedule'] is Map && json['customSchedule']['selectedDays'] != null) {
+    if (json['customSchedule'] is Map &&
+        json['customSchedule']['selectedDays'] != null) {
       final d = json['customSchedule']['selectedDays'];
       if (d is List) {
         daysStr = d.join(', ');
@@ -2277,27 +2660,45 @@ class RideInfo {
       }
     }
 
-    final vType = (json['vehicleType'] ?? json['vehiclePreference'] ?? json['vehicle'] ?? 'Sedan').toString();
-    final acPref = (json['acPreference'] ?? (json['acRequired'] == false ? 'Non-AC' : 'AC Required')).toString();
-    final notes = (json['notes'] ?? json['passengerNotes'] ?? json['specialInstructions'] ?? json['remarks'] ?? '').toString();
+    final vType =
+        (json['vehicleType'] ??
+                json['vehiclePreference'] ??
+                json['vehicle'] ??
+                'Sedan')
+            .toString();
+    final acPref =
+        (json['acPreference'] ??
+                (json['acRequired'] == false ? 'Non-AC' : 'AC Required'))
+            .toString();
+    final notes =
+        (json['notes'] ??
+                json['passengerNotes'] ??
+                json['specialInstructions'] ??
+                json['remarks'] ??
+                '')
+            .toString();
 
-    final asgDriver = (json['assignedDriver'] ?? json['assignedDriverName'] ?? '').toString();
-    final asgDriverId = (json['assignedDriverId'] ?? json['driverId'] ?? json['driver'] ?? '').toString();
+    final asgDriver =
+        (json['assignedDriver'] ?? json['assignedDriverName'] ?? '').toString();
+    final asgDriverId =
+        (json['assignedDriverId'] ?? json['driverId'] ?? json['driver'] ?? '')
+            .toString();
 
     return RideInfo(
-      id: json['_id']?.toString() ??
+      id:
+          json['_id']?.toString() ??
           json['rideId']?.toString() ??
           json['id']?.toString() ??
           '',
-      requestId: json['requestId']?.toString() ??
-          json['id']?.toString() ??
-          '',
+      requestId: json['requestId']?.toString() ?? json['id']?.toString() ?? '',
       name: custName,
       phone: custPhone.toString(),
       pickup: pickup,
       drop: drop,
       date: date.toString(),
-      scheduledTime: pTime.isNotEmpty ? pTime : (dTime.isNotEmpty ? dTime : 'ASAP'),
+      scheduledTime: pTime.isNotEmpty
+          ? pTime
+          : (dTime.isNotEmpty ? dTime : 'ASAP'),
       scheduleType: schedType,
       pickupTime: pTime,
       dropoffTime: dTime,

@@ -7,6 +7,7 @@ import 'manage_availability_screen.dart';
 import 'ride_management_screen.dart';
 import 'report_issue_screen.dart';
 import 'profile_settings_screen.dart';
+import 'route_match_setup_screen.dart';
 
 class DriverDashboardScreen extends StatelessWidget {
   final String driverName;
@@ -92,7 +93,11 @@ class DriverDashboardScreen extends StatelessWidget {
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 2.5),
                             boxShadow: const [
-                              BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4)),
+                              BoxShadow(
+                                color: Colors.black12,
+                                blurRadius: 8,
+                                offset: Offset(0, 4),
+                              ),
                             ],
                           ),
                           child: CircleAvatar(
@@ -108,13 +113,21 @@ class DriverDashboardScreen extends StatelessWidget {
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 2.5),
                             boxShadow: const [
-                              BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4)),
+                              BoxShadow(
+                                color: Colors.black12,
+                                blurRadius: 8,
+                                offset: Offset(0, 4),
+                              ),
                             ],
                           ),
                           child: const CircleAvatar(
                             radius: 36,
                             backgroundColor: Colors.white24,
-                            child: Icon(Icons.person, color: Colors.white, size: 40),
+                            child: Icon(
+                              Icons.person,
+                              color: Colors.white,
+                              size: 40,
+                            ),
                           ),
                         ),
                       Text(
@@ -202,21 +215,29 @@ class DriverDashboardScreen extends StatelessWidget {
                               context: context,
                               backgroundColor: Colors.white,
                               shape: const RoundedRectangleBorder(
-                                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                                borderRadius: BorderRadius.vertical(
+                                  top: Radius.circular(24),
+                                ),
                               ),
                               builder: (ctx) => SafeArea(
                                 child: Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 20),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 20,
+                                  ),
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       Container(
                                         width: 40,
                                         height: 4,
-                                        margin: const EdgeInsets.only(bottom: 20),
+                                        margin: const EdgeInsets.only(
+                                          bottom: 20,
+                                        ),
                                         decoration: BoxDecoration(
                                           color: Colors.grey.shade300,
-                                          borderRadius: BorderRadius.circular(2),
+                                          borderRadius: BorderRadius.circular(
+                                            2,
+                                          ),
                                         ),
                                       ),
                                       Text(
@@ -229,46 +250,108 @@ class DriverDashboardScreen extends StatelessWidget {
                                       ),
                                       const SizedBox(height: 16),
                                       ListTile(
-                                        leading: const Icon(Icons.calendar_month_rounded, color: Color(0xFF1959F6)),
-                                        title: Text('Monthly pick and drop', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                                        leading: const Icon(
+                                          Icons.calendar_month_rounded,
+                                          color: Color(0xFF1959F6),
+                                        ),
+                                        title: Text(
+                                          'Monthly pick and drop',
+                                          style: GoogleFonts.inter(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
                                         onTap: () {
                                           Navigator.pop(ctx);
                                           Navigator.of(context).push(
                                             MaterialPageRoute(
-                                              builder: (_) => RideManagementScreen(
-                                                driverId: driverId,
-                                                driverName: driverName,
-                                              ),
+                                              builder: (_) =>
+                                                  RideManagementScreen(
+                                                    driverId: driverId,
+                                                    driverName: driverName,
+                                                    filterPrefix: 'REQ-',
+                                                    moduleName:
+                                                        'Monthly Pick & Drop',
+                                                  ),
                                             ),
                                           );
                                         },
                                       ),
                                       ListTile(
-                                        leading: const Icon(Icons.schedule_rounded, color: Color(0xFF1959F6)),
-                                        title: Text('Scheduled rides', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                                        leading: const Icon(
+                                          Icons.schedule_rounded,
+                                          color: Color(0xFF1959F6),
+                                        ),
+                                        title: Text(
+                                          'Scheduled rides',
+                                          style: GoogleFonts.inter(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
                                         onTap: () {
                                           Navigator.pop(ctx);
                                           Navigator.of(context).push(
                                             MaterialPageRoute(
-                                              builder: (_) => RideManagementScreen(
-                                                driverId: driverId,
-                                                driverName: driverName,
-                                              ),
+                                              builder: (_) =>
+                                                  RideManagementScreen(
+                                                    driverId: driverId,
+                                                    driverName: driverName,
+                                                    filterPrefix: 'SCH-',
+                                                    moduleName:
+                                                        'Scheduled Rides',
+                                                  ),
                                             ),
                                           );
                                         },
                                       ),
                                       ListTile(
-                                        leading: const Icon(Icons.person_outline_rounded, color: Color(0xFF1959F6)),
-                                        title: Text('Hire driver', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                                        leading: const Icon(
+                                          Icons.person_outline_rounded,
+                                          color: Color(0xFF1959F6),
+                                        ),
+                                        title: Text(
+                                          'Hire driver',
+                                          style: GoogleFonts.inter(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
                                         onTap: () {
                                           Navigator.pop(ctx);
                                           Navigator.of(context).push(
                                             MaterialPageRoute(
-                                              builder: (_) => RideManagementScreen(
-                                                driverId: driverId,
-                                                driverName: driverName,
-                                              ),
+                                              builder: (_) =>
+                                                  RideManagementScreen(
+                                                    driverId: driverId,
+                                                    driverName: driverName,
+                                                    filterPrefix: 'HDR-',
+                                                    moduleName: 'Hire Driver',
+                                                  ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      ListTile(
+                                        leading: const Icon(
+                                          Icons.luggage_rounded,
+                                          color: Color(0xFF1959F6),
+                                        ),
+                                        title: Text(
+                                          'Travel & Tourism',
+                                          style: GoogleFonts.inter(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        onTap: () {
+                                          Navigator.pop(ctx);
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  RideManagementScreen(
+                                                    driverId: driverId,
+                                                    driverName: driverName,
+                                                    filterPrefix: 'TT-',
+                                                    moduleName:
+                                                        'Travel & Tourism',
+                                                  ),
                                             ),
                                           );
                                         },
@@ -287,8 +370,7 @@ class DriverDashboardScreen extends StatelessWidget {
                           context: context,
                           icon: Icons.warning_rounded,
                           title: 'Report an Issue',
-                          subtitle:
-                              'Select passenger(s) and report an issue.',
+                          subtitle: 'Select passenger(s) and report an issue.',
                           onTap: () {
                             Navigator.of(context).push(
                               MaterialPageRoute(
@@ -308,8 +390,13 @@ class DriverDashboardScreen extends StatelessWidget {
                           icon: Icons.chat_bubble_outline_rounded,
                           title: 'Route Matching',
                           subtitle: 'See suggested Route Requests.',
-                          onTap: () =>
-                              _showActionFeedback(context, 'Route Matching'),
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const RouteMatchSetupScreen(),
+                              ),
+                            );
+                          },
                         ),
                         const SizedBox(height: 14),
 

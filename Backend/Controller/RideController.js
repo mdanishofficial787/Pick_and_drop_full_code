@@ -898,9 +898,14 @@ exports.getAssignedRides = async (req, res) => {
     // Index loaded requests by _id and requestId in-memory for instant O(1) matching with zero extra DB roundtrips
     const reqLookupMap = new Map();
 
-    const processCollectionResults = (res) => {
+    const processCollectionResults = (res, defaultPrefix) => {
       if (res.status === "fulfilled" && Array.isArray(res.value)) {
         for (const r of res.value) {
+          if (!r.requestId && defaultPrefix) {
+            const idStr = (r._id ? r._id.toString() : "") || (r.id ? r.id.toString() : "");
+            if (idStr) r.requestId = `${defaultPrefix}-${idStr.substring(Math.max(0, idStr.length - 6)).toUpperCase()}`;
+          }
+
           if (r._id && !reqLookupMap.has(r._id.toString())) reqLookupMap.set(r._id.toString(), r);
           if (r.requestId && !reqLookupMap.has(r.requestId.toString())) reqLookupMap.set(r.requestId.toString(), r);
           if (r.id && !reqLookupMap.has(r.id.toString())) reqLookupMap.set(r.id.toString(), r);
@@ -910,13 +915,40 @@ exports.getAssignedRides = async (req, res) => {
       }
     };
 
-    processCollectionResults(rrsRes);
-    processCollectionResults(trsRes);
-    processCollectionResults(ridesRes);
-    processCollectionResults(hireRes);
-    processCollectionResults(rplRes);
+    processCollectionResults(rrsRes, "REQ");
+    processCollectionResults(trsRes, "TT");
+    processCollectionResults(ridesRes, "REQ");
+    processCollectionResults(hireRes, "HDR");
+    processCollectionResults(rplRes, "RPL");
 
     if (asgRes.status === "fulfilled" && Array.isArray(asgRes.value)) {
+      const missingIds = [];
+      for (const assignment of asgRes.value) {
+        const asgReqId = assignment.requestId ? assignment.requestId.toString() : "";
+        if (asgReqId && !reqLookupMap.has(asgReqId)) missingIds.push(asgReqId);
+      }
+      
+      if (missingIds.length > 0) {
+        const mongoose = require("mongoose");
+        const missingOids = missingIds.filter(id => mongoose.Types.ObjectId.isValid(id)).map(id => new mongoose.Types.ObjectId(id));
+        const missingFilter = { $or: [{ _id: { $in: missingOids } }, { requestId: { $in: missingIds } }, { id: { $in: missingIds } }] };
+        try {
+          const extraReqs = await Promise.all([
+            db.collection("requests").find(missingFilter).toArray(),
+            db.collection("riderequests").find(missingFilter).toArray(),
+            db.collection("driverhirerequests").find(missingFilter).toArray(),
+            db.collection("replacementrequests").find(missingFilter).toArray()
+          ]);
+          for (const r of extraReqs.flat()) {
+            if (r._id) reqLookupMap.set(r._id.toString(), r);
+            if (r.requestId) reqLookupMap.set(r.requestId.toString(), r);
+            if (r.id) reqLookupMap.set(r.id.toString(), r);
+          }
+        } catch (e) {
+          console.error("Error fetching missing requests for assignments", e);
+        }
+      }
+
       for (const assignment of asgRes.value) {
         const asgReqId = assignment.requestId ? assignment.requestId.toString() : "";
         const realReq = asgReqId ? reqLookupMap.get(asgReqId) : null;
@@ -926,6 +958,21 @@ exports.getAssignedRides = async (req, res) => {
         const item = formatRawDoc(docToFormat, effectiveReqStatus);
         if (item) {
           item.assignmentId = assignment.assignmentId || assignment._id.toString();
+          if (assignment.driverId) {
+            const dIdStr = assignment.driverId.toString();
+            item.driverId = dIdStr;
+            item.driver = dIdStr;
+            item.assignedDriverId = dIdStr;
+          }
+          if (assignment.driverDetails) {
+            item.assignedDriver = assignment.driverDetails.name || item.assignedDriver;
+            item.assignedDriverName = assignment.driverDetails.name || item.assignedDriverName;
+            item.driverDetails = assignment.driverDetails;
+          } else if (assignment.assignedDriverName || assignment.driverName) {
+            const dName = (assignment.assignedDriverName || assignment.driverName).toString();
+            item.assignedDriver = dName;
+            item.assignedDriverName = dName;
+          }
           allFormatted.push(item);
         }
       }
@@ -1059,6 +1106,8 @@ exports.updateRideStatus = async (req, res) => {
 
       try { await db.collection("requests").updateOne(reqQuery, { $set: reqUpdateFields }); } catch (_) {}
       try { await db.collection("riderequests").updateOne(reqQuery, { $set: reqUpdateFields }); } catch (_) {}
+      try { await db.collection("driverhirerequests").updateOne(reqQuery, { $set: reqUpdateFields }); } catch (_) {}
+      try { await db.collection("replacementrequests").updateOne(reqQuery, { $set: reqUpdateFields }); } catch (_) {}
       try {
         if (asgReqOid) {
           await Ride.findByIdAndUpdate(asgReqOid, { $set: { status: status.toUpperCase(), driver: driverDetails?.driverId || targetDriverId } });
@@ -1101,6 +1150,8 @@ exports.updateRideStatus = async (req, res) => {
 
         try { await db.collection("requests").updateOne(reqQuery, { $set: reqUpdateFields }); } catch (_) {}
         try { await db.collection("riderequests").updateOne(reqQuery, { $set: reqUpdateFields }); } catch (_) {}
+        try { await db.collection("driverhirerequests").updateOne(reqQuery, { $set: reqUpdateFields }); } catch (_) {}
+        try { await db.collection("replacementrequests").updateOne(reqQuery, { $set: reqUpdateFields }); } catch (_) {}
         try {
           if (oid) {
             await Ride.findByIdAndUpdate(oid, { $set: { status: status.toUpperCase(), driver: driverDetails?.driverId || targetDriverId } });
