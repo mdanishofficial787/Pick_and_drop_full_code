@@ -1,11 +1,11 @@
 const Customer = require("../schema/user");
-const PasswordResetRequest = require("../schema/PasswordResetRequest");
 const OTP = require("../schema/otp");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const sendOTPEmail = require("../utils/Email");
 
 // ==========================================
-// POST /api/auth/forgot-password/send-otp (repurposed for Admin Request)
+// POST /api/auth/forgot-password/send-otp
 // body: { email }
 // ==========================================
 module.exports.sendForgotPasswordOtp = async (req, res) => {
@@ -20,57 +20,60 @@ module.exports.sendForgotPasswordOtp = async (req, res) => {
         }
 
         const normalizedEmail = email.trim().toLowerCase();
+        const escapedEmail = normalizedEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
         const customer = await Customer.findOne({
-            Email: normalizedEmail
+            $or: [
+                { Email: normalizedEmail },
+                { Email: { $regex: new RegExp("^" + escapedEmail + "$", "i") } }
+            ]
         });
 
         if (!customer) {
             return res.status(404).json({
                 success: false,
-                message: "No account found with this email"
+                message: "No customer account found with this email"
             });
         }
 
-        // Check for existing recent requests to enforce 15-minute cooldown
-        const existingRequest = await PasswordResetRequest.findOne({
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        console.log(`[Forgot Password] Generated OTP for ${normalizedEmail}:`, otp);
+
+        const hashedOTP = await bcrypt.hash(otp, 10);
+
+        // Delete any existing OTP for this customer
+        await OTP.deleteMany({ customerId: customer._id });
+
+        // Save new OTP
+        await OTP.create({
+            customerId: customer._id,
             email: normalizedEmail,
-            userType: "Customer",
-            status: "Pending"
-        }).sort({ createdAt: -1 });
-
-        if (existingRequest) {
-            const timeSinceLastRequest = Date.now() - new Date(existingRequest.createdAt).getTime();
-            const fifteenMinutes = 15 * 60 * 1000;
-
-            if (timeSinceLastRequest < fifteenMinutes) {
-                const minutesLeft = Math.ceil((fifteenMinutes - timeSinceLastRequest) / 60000);
-                return res.status(429).json({
-                    success: false,
-                    message: `Please wait ${minutesLeft} minute(s) before sending another request.`,
-                });
-            }
-        }
-
-        // Clear any previous Pending requests that are OLDER than 15 minutes
-        await PasswordResetRequest.deleteMany({ email: normalizedEmail, userType: "Customer", status: "Pending" });
-
-        // Create a new request for Admin Approval
-        await PasswordResetRequest.create({
-            email: normalizedEmail,
-            userType: "Customer",
-            status: "Pending"
+            otp: hashedOTP,
+            otpExpiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+            otpAttempts: 0,
+            verified: false,
+            resendCount: 0,
+            lastResendAt: null
         });
 
-        console.log("Password reset request sent for admin approval:", normalizedEmail);
+        // Send OTP via email
+        try {
+            await sendOTPEmail(normalizedEmail, otp);
+            console.log("Forgot Password OTP email sent successfully to:", normalizedEmail);
+        } catch (mailErr) {
+            console.warn("Nodemailer notice (OTP logged to console):", mailErr.message);
+        }
 
         return res.status(200).json({
             success: true,
-            message: "Request sent to Admin for approval."
+            message: "OTP sent to your email successfully",
+            email: normalizedEmail,
+            phoneNumber: customer.PhoneNumber
         });
 
     } catch (err) {
-        console.error("Send Forgot Password Request Error:", err);
+        console.error("Send Forgot Password OTP Error:", err);
         return res.status(500).json({
             success: false,
             message: "Internal Server Error",
@@ -80,46 +83,120 @@ module.exports.sendForgotPasswordOtp = async (req, res) => {
 };
 
 // ==========================================
-// GET /api/auth/forgot-password/status?email=xyz
+// POST /api/auth/forgot-password/verify-otp
+// body: { email, otp }
 // ==========================================
-module.exports.checkPasswordResetStatus = async (req, res) => {
+module.exports.verifyForgotPasswordOtp = async (req, res) => {
     try {
-        const { email } = req.query;
+        const { email, otp } = req.body;
 
-        if (!email) {
+        if (!email || !otp) {
             return res.status(400).json({
                 success: false,
-                message: "Email is required"
+                message: "Email and OTP are required"
             });
         }
 
         const normalizedEmail = email.trim().toLowerCase();
+        const escapedEmail = normalizedEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-        const request = await PasswordResetRequest.findOne({
-            email: normalizedEmail,
-            userType: "Customer"
-        }).sort({ createdAt: -1 });
+        const customer = await Customer.findOne({
+            $or: [
+                { Email: normalizedEmail },
+                { Email: { $regex: new RegExp("^" + escapedEmail + "$", "i") } }
+            ]
+        });
 
-        if (!request) {
+        if (!customer) {
             return res.status(404).json({
                 success: false,
-                message: "No password reset request found."
+                message: "Customer not found"
             });
         }
 
+        const otpData = await OTP.findOne({
+            customerId: customer._id
+        }).sort({ createdAt: -1 });
+
+        if (!otpData) {
+            return res.status(404).json({
+                success: false,
+                message: "OTP not found or expired. Please request a new one."
+            });
+        }
+
+        if (otpData.otpAttempts >= 5) {
+            return res.status(400).json({
+                success: false,
+                message: "Maximum OTP attempts exceeded. Please request a new OTP."
+            });
+        }
+
+        if (!otpData.otpExpiresAt || new Date() > otpData.otpExpiresAt) {
+            return res.status(400).json({
+                success: false,
+                message: "OTP has expired. Please request a new code."
+            });
+        }
+
+        const isMatch = await bcrypt.compare(otp.toString().trim(), otpData.otp);
+
+        if (!isMatch) {
+            otpData.otpAttempts += 1;
+            await otpData.save();
+            return res.status(400).json({
+                success: false,
+                message: "Invalid OTP code. Please try again."
+            });
+        }
+
+        // Clean up OTP record
+        await OTP.findByIdAndDelete(otpData._id);
+
+        // Generate Password Reset Token (valid for 15 minutes)
+        const resetToken = jwt.sign(
+            {
+                id: customer._id,
+                email: customer.Email,
+                purpose: "password_reset"
+            },
+            process.env.JWT_SECRET || "default_jwt_secret_key_ride_and_serve",
+            {
+                expiresIn: "15m"
+            }
+        );
+
         return res.status(200).json({
             success: true,
-            status: request.status,
-            resetToken: request.resetToken
+            message: "OTP verified successfully",
+            resetToken: resetToken,
+            customer: {
+                id: customer._id,
+                fullName: customer.fullName,
+                email: customer.Email,
+                phoneNumber: customer.PhoneNumber,
+                countryCode: customer.countryCode
+            }
         });
+
     } catch (err) {
-        console.error("Check Status Error:", err);
+        console.error("Verify Forgot Password OTP Error:", err);
         return res.status(500).json({
             success: false,
             message: "Internal Server Error",
             error: err.message
         });
     }
+};
+
+// ==========================================
+// GET /api/auth/forgot-password/status?email=xyz (backwards compatibility)
+// ==========================================
+module.exports.checkPasswordResetStatus = async (req, res) => {
+    return res.status(200).json({
+        success: true,
+        message: "Status endpoint available"
+    });
 };
 
 // ==========================================
@@ -144,13 +221,20 @@ module.exports.resetPassword = async (req, res) => {
             });
         }
 
+        if (newPassword.length < 8) {
+            return res.status(400).json({
+                success: false,
+                message: "Password must be at least 8 characters long"
+            });
+        }
+
         let payload;
         try {
-            payload = jwt.verify(resetToken, process.env.JWT_SECRET);
+            payload = jwt.verify(resetToken, process.env.JWT_SECRET || "default_jwt_secret_key_ride_and_serve");
         } catch (err) {
             return res.status(400).json({
                 success: false,
-                message: "Reset link expired or invalid."
+                message: "Reset token has expired or is invalid. Please request a new OTP."
             });
         }
 
@@ -166,7 +250,7 @@ module.exports.resetPassword = async (req, res) => {
         if (!customer) {
             return res.status(404).json({
                 success: false,
-                message: "Customer not found"
+                message: "Customer account not found"
             });
         }
 
@@ -174,13 +258,15 @@ module.exports.resetPassword = async (req, res) => {
         customer.Password = hashedPassword;
         await customer.save();
 
-        // Clear any previous OTPs or ResetRequests for this customer
+        // Clear any previous OTPs
         await OTP.deleteMany({ customerId: customer._id });
-        await PasswordResetRequest.deleteMany({ email: customer.Email, userType: "Customer" });
 
         return res.status(200).json({
             success: true,
-            message: "Password reset successful"
+            message: "Password reset successful! You can now log in with your new password.",
+            phoneNumber: customer.PhoneNumber,
+            countryCode: customer.countryCode,
+            fullName: customer.fullName
         });
 
     } catch (err) {

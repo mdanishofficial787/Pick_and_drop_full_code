@@ -1,0 +1,1 @@
+const mongoose = require('mongoose'); mongoose.connect('mongodb+srv://sadiarafiquedev_db_user:KhmXmAyYP9SxabFR@cluster0.yhrbvje.mongodb.net/test?appName=Cluster0').then(async () => { const dbTest = mongoose.connection.useDb('test'); const colls = await dbTest.listCollections(); console.log(colls.map(c => c.name)); process.exit(0); });

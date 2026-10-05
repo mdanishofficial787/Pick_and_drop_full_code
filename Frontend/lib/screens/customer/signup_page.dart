@@ -1,13 +1,11 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'dart:convert';
+import 'package:image_picker/image_picker.dart';
+import 'package:ride_and_serve/constants/app_colors.dart';
 import 'package:ride_and_serve/screens/customer/login_page.dart';
 import 'package:ride_and_serve/screens/customer/otp_verification_page.dart';
-
-import 'package:http/http.dart' as http;
-import 'package:image_picker/image_picker.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-//import 'package:google_sign_in_web/web_only.dart';
+import 'package:ride_and_serve/screens/customer/profile_image_cropper.dart';
+import 'package:ride_and_serve/services/auth_service.dart';
 
 class SignUpPage extends StatefulWidget {
   const SignUpPage({super.key});
@@ -20,7 +18,6 @@ class _SignUpPageState extends State<SignUpPage> {
   final _formKey = GlobalKey<FormState>();
 
   final ImagePicker _picker = ImagePicker();
-  XFile? _selectedImage;
   Uint8List? _selectedImageBytes;
 
   final _fullNameController = TextEditingController();
@@ -29,17 +26,21 @@ class _SignUpPageState extends State<SignUpPage> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
-  final GoogleSignIn googleSignIn = GoogleSignIn(
-    clientId:
-        "895664225286-bg2kcb118qi532u7pehcja01s33f1a58.apps.googleusercontent.com",
-  );
-
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _agreedToTerms = false;
   bool _isSubmitting = false;
-
   String _countryCode = '+92';
+
+  @override
+  void dispose() {
+    _fullNameController.dispose();
+    _phoneController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
 
   String? _requiredValidator(String? value, String fieldName) {
     if (value == null || value.trim().isEmpty) {
@@ -53,15 +54,16 @@ class _SignUpPageState extends State<SignUpPage> {
       return 'Phone number is required';
     }
     final digitsOnly = value.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digitsOnly.length < 9) return 'Enter a valid phone number';
+    if (digitsOnly.length < 7) return 'Enter a valid phone number';
     return null;
   }
 
   String? _emailValidator(String? value) {
-    // Optional field — only validate format if something was typed.
-    if (value == null || value.trim().isEmpty) return null;
+    if (value == null || value.trim().isEmpty) {
+      return 'Email is required for OTP verification';
+    }
     final emailRegex = RegExp(r'^[\w\.\-]+@([\w\-]+\.)+[\w\-]{2,4}$');
-    if (!emailRegex.hasMatch(value.trim())) return 'Enter a valid email';
+    if (!emailRegex.hasMatch(value.trim())) return 'Enter a valid email address';
     return null;
   }
 
@@ -75,74 +77,6 @@ class _SignUpPageState extends State<SignUpPage> {
     if (value == null || value.isEmpty) return 'Please confirm your password';
     if (value != _passwordController.text) return 'Passwords do not match';
     return null;
-  }
-
-  Future<void> _handleGoogleSignup() async {
-    try {
-      debugPrint("Starting Google Sign-In...");
-
-      final GoogleSignInAccount? account = await googleSignIn.signIn();
-
-      if (account == null) {
-        debugPrint("Google Sign-In cancelled.");
-        return;
-      }
-
-      debugPrint("Google account: ${account.email}");
-
-      final GoogleSignInAuthentication googleAuth =
-          await account.authentication;
-
-      final String? accessToken = googleAuth.accessToken;
-
-      debugPrint("Access Token received: ${accessToken != null}");
-
-      if (accessToken == null || accessToken.isEmpty) {
-        if (!mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Google access token was not received."),
-          ),
-        );
-
-        return;
-      }
-
-      // Send ACCESS TOKEN to your Node.js backend
-      final response = await http.post(
-        Uri.parse("http://localhost:3000/api/auth/google"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"accessToken": accessToken}),
-      );
-
-      debugPrint("Google backend status: ${response.statusCode}");
-
-      debugPrint("Google backend response: ${response.body}");
-
-      if (!mounted) return;
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Google signup/login successful!")),
-        );
-
-        // Later you can navigate to your dashboard/home page here.
-        // For now, we only confirm successful authentication.
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Google signup failed: ${response.body}")),
-        );
-      }
-    } catch (e) {
-      debugPrint("Google Signup Error: $e");
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Google signup failed: $e")));
-    }
   }
 
   Future<void> _handleCreateAccount() async {
@@ -159,46 +93,21 @@ class _SignUpPageState extends State<SignUpPage> {
     setState(() => _isSubmitting = true);
 
     try {
-      final uri = Uri.parse("http://localhost:3000/api/auth/signup");
-
-      var request = http.MultipartRequest("POST", uri);
-
-      request.fields["fullName"] = _fullNameController.text.trim();
-
-      request.fields["PhoneNumber"] = _phoneController.text
-          .trim(); // Only the number, e.g. 3001234567
-
-      request.fields["countryCode"] = _countryCode; // e.g. +92
-
-      debugPrint('EMAIL BEING SENT: ${_emailController.text.trim()}');
-
-      request.fields['Email'] = _emailController.text.trim();
-
-      request.fields["Password"] = _passwordController.text;
-
-      request.fields["confirmPassword"] = _confirmPasswordController.text;
-
-      request.fields["termsAccepted"] = "true";
-
-      request.fields["tcVersion"] = "1.0";
-
-      if (_selectedImage != null && _selectedImageBytes != null) {
-        request.files.add(
-          http.MultipartFile.fromBytes(
-            "CustomerPhoto",
-            _selectedImageBytes!,
-            filename: _selectedImage!.name,
-          ),
-        );
-      }
-
-      final response = await request.send();
-
-      final responseBody = await response.stream.bytesToString();
+      final email = _emailController.text.trim();
+      final response = await AuthService.signup(
+        fullName: _fullNameController.text.trim(),
+        phoneNumber: _phoneController.text.trim(),
+        countryCode: _countryCode,
+        email: email,
+        password: _passwordController.text,
+        confirmPassword: _confirmPasswordController.text,
+        photoBytes: _selectedImageBytes,
+        photoFilename: _selectedImageBytes != null ? 'profile_${DateTime.now().millisecondsSinceEpoch}.png' : null,
+      );
 
       if (!mounted) return;
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
+      if (response.success) {
         showDialog(
           context: context,
           barrierDismissible: false,
@@ -230,9 +139,10 @@ class _SignUpPageState extends State<SignUpPage> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    const Text(
-                      "Your account has been created successfully.\n\nWe've sent a verification code to your email.",
+                    Text(
+                      "Your account has been created.\n\nWe sent a 6-digit verification code to:\n$email",
                       textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 14, color: Colors.black54),
                     ),
                     const SizedBox(height: 25),
                     SizedBox(
@@ -245,6 +155,15 @@ class _SignUpPageState extends State<SignUpPage> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => OtpVerificationPage(email: email),
+                            ),
+                          );
+                        },
                         child: const Text(
                           "VERIFY NOW",
                           style: TextStyle(
@@ -252,18 +171,6 @@ class _SignUpPageState extends State<SignUpPage> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        onPressed: () {
-                          Navigator.pop(context);
-
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => OtpVerificationPage(
-                                email: _emailController.text.trim(),
-                              ),
-                            ),
-                          );
-                        },
                       ),
                     ),
                   ],
@@ -273,14 +180,18 @@ class _SignUpPageState extends State<SignUpPage> {
           },
         );
       } else {
-        throw Exception(responseBody);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(response.message),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
       }
     } catch (e) {
       if (!mounted) return;
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Signup failed: $e")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Signup failed: $e'), backgroundColor: Colors.redAccent),
+      );
     } finally {
       if (mounted) {
         setState(() => _isSubmitting = false);
@@ -288,36 +199,110 @@ class _SignUpPageState extends State<SignUpPage> {
     }
   }
 
-  Future<void> pickImage() async {
-    final image = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 80,
+  Future<void> _pickImage() async {
+    final ImageSource? source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (BuildContext ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const Text(
+                  'Select Profile Photo',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryBlue.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.camera_alt, color: AppColors.primaryBlue),
+                  ),
+                  title: const Text('Take Photo (Camera)', style: TextStyle(fontWeight: FontWeight.w600)),
+                  onTap: () => Navigator.pop(ctx, ImageSource.camera),
+                ),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryBlue.withValues(alpha: 0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.photo_library, color: AppColors.primaryBlue),
+                  ),
+                  title: const Text('Choose from Gallery', style: TextStyle(fontWeight: FontWeight.w600)),
+                  onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
 
-    if (image != null) {
-      final bytes = await image.readAsBytes();
-      setState(() {
-        _selectedImage = image;
-        _selectedImageBytes = bytes;
-      });
+    if (source == null) return;
+
+    try {
+      final image = await _picker.pickImage(
+        source: source,
+        imageQuality: 85,
+      );
+
+      if (image != null) {
+        final originalBytes = await image.readAsBytes();
+
+        if (!mounted) return;
+
+        // Open cropper / adjustment screen
+        final Uint8List? croppedBytes = await Navigator.push<Uint8List>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ProfileImageCropperPage(imageBytes: originalBytes),
+          ),
+        );
+
+        if (croppedBytes != null && mounted) {
+          setState(() {
+            _selectedImageBytes = croppedBytes;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Image pick/crop error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load image: $e')),
+        );
+      }
     }
   }
 
   @override
-  void dispose() {
-    _fullNameController.dispose();
-    _phoneController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _confirmPasswordController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    const primaryBlue = Color(0xFF1959F6);
+    const primaryBlue = AppColors.primaryBlue;
     const fieldFill = Color(0xFFF5F6F8);
-    //const labelGrey = Color(0xFF8A8F98);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -330,7 +315,6 @@ class _SignUpPageState extends State<SignUpPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Top bar: back arrow
                 const SizedBox(height: 8),
                 IconButton(
                   padding: EdgeInsets.zero,
@@ -338,13 +322,11 @@ class _SignUpPageState extends State<SignUpPage> {
                   onPressed: () => Navigator.of(context).maybePop(),
                   icon: const Icon(Icons.arrow_back, color: Colors.black87),
                 ),
-
-                // Title
                 const Center(
                   child: Text(
                     'Create Account',
                     style: TextStyle(
-                      fontSize: 20,
+                      fontSize: 22,
                       fontWeight: FontWeight.w700,
                       color: Colors.black87,
                     ),
@@ -381,13 +363,11 @@ class _SignUpPageState extends State<SignUpPage> {
                               )
                             : null,
                       ),
-
-                      // + button
                       Positioned(
                         bottom: 0,
                         right: 0,
                         child: GestureDetector(
-                          onTap: pickImage,
+                          onTap: _pickImage,
                           child: Container(
                             width: 28,
                             height: 28,
@@ -406,27 +386,21 @@ class _SignUpPageState extends State<SignUpPage> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 24),
 
                 // Full Name
-                _FieldLabel('FULL NAME', const Color.fromARGB(255, 10, 10, 10)),
+                _fieldLabel('FULL NAME'),
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _fullNameController,
                   textInputAction: TextInputAction.next,
-                  decoration: _inputDecoration(
-                    hint: 'John Doe',
-                    fill: fieldFill,
-                  ),
+                  decoration: _inputDecoration(hint: 'John Doe', fill: fieldFill),
                   validator: (v) => _requiredValidator(v, 'Full name'),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
 
                 // Phone Number
-                _FieldLabel(
-                  'PHONE NUMBER',
-                  const Color.fromARGB(255, 10, 10, 10),
-                ),
+                _fieldLabel('PHONE NUMBER'),
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -442,18 +416,9 @@ class _SignUpPageState extends State<SignUpPage> {
                           value: _countryCode,
                           icon: const Icon(Icons.keyboard_arrow_down, size: 18),
                           items: const [
-                            DropdownMenuItem(
-                              value: '+92',
-                              child: Text('🇵🇰 +92'),
-                            ),
-                            DropdownMenuItem(
-                              value: '+1',
-                              child: Text('🇺🇸 +1'),
-                            ),
-                            DropdownMenuItem(
-                              value: '+44',
-                              child: Text('🇬🇧 +44'),
-                            ),
+                            DropdownMenuItem(value: '+92', child: Text('🇵🇰 +92')),
+                            DropdownMenuItem(value: '+1', child: Text('🇺🇸 +1')),
+                            DropdownMenuItem(value: '+44', child: Text('🇬🇧 +44')),
                           ],
                           onChanged: (val) {
                             if (val != null) setState(() => _countryCode = val);
@@ -467,37 +432,28 @@ class _SignUpPageState extends State<SignUpPage> {
                         controller: _phoneController,
                         keyboardType: TextInputType.phone,
                         textInputAction: TextInputAction.next,
-                        decoration: _inputDecoration(
-                          hint: '300 1234567',
-                          fill: fieldFill,
-                        ),
+                        decoration: _inputDecoration(hint: '300 1234567', fill: fieldFill),
                         validator: _phoneValidator,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
 
-                // Email (optional)
-                _FieldLabel(
-                  'EMAIL (OPTIONAL)',
-                  const Color.fromARGB(255, 10, 10, 10),
-                ),
+                // Email
+                _fieldLabel('EMAIL ADDRESS'),
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
-                  decoration: _inputDecoration(
-                    hint: 'john@example.com',
-                    fill: fieldFill,
-                  ),
+                  decoration: _inputDecoration(hint: 'john@example.com', fill: fieldFill),
                   validator: _emailValidator,
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
 
                 // Password
-                _FieldLabel('PASSWORD', const Color.fromARGB(255, 10, 10, 10)),
+                _fieldLabel('PASSWORD'),
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _passwordController,
@@ -508,25 +464,19 @@ class _SignUpPageState extends State<SignUpPage> {
                     fill: fieldFill,
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _obscurePassword
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
+                        _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
                         size: 20,
                         color: Colors.black45,
                       ),
-                      onPressed: () =>
-                          setState(() => _obscurePassword = !_obscurePassword),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                     ),
                   ),
                   validator: _passwordValidator,
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
 
                 // Confirm Password
-                _FieldLabel(
-                  'CONFIRM PASSWORD',
-                  const Color.fromARGB(255, 10, 10, 10),
-                ),
+                _fieldLabel('CONFIRM PASSWORD'),
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _confirmPasswordController,
@@ -537,23 +487,18 @@ class _SignUpPageState extends State<SignUpPage> {
                     fill: fieldFill,
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _obscureConfirmPassword
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
+                        _obscureConfirmPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
                         size: 20,
                         color: Colors.black45,
                       ),
-                      onPressed: () => setState(
-                        () =>
-                            _obscureConfirmPassword = !_obscureConfirmPassword,
-                      ),
+                      onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
                     ),
                   ),
                   validator: _confirmPasswordValidator,
                 ),
                 const SizedBox(height: 16),
 
-                // Terms checkbox
+                // Terms Checkbox
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
@@ -563,36 +508,24 @@ class _SignUpPageState extends State<SignUpPage> {
                       child: Checkbox(
                         value: _agreedToTerms,
                         activeColor: primaryBlue,
-                        onChanged: (val) =>
-                            setState(() => _agreedToTerms = val ?? false),
+                        onChanged: (val) => setState(() => _agreedToTerms = val ?? false),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: RichText(
-                        text: TextSpan(
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.black87,
-                          ),
+                        text: const TextSpan(
+                          style: TextStyle(fontSize: 13, color: Colors.black87),
                           children: [
-                            const TextSpan(text: 'I agree to the '),
+                            TextSpan(text: 'I agree to the '),
                             TextSpan(
                               text: 'Terms & Conditions',
-                              style: const TextStyle(
-                                color: primaryBlue,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              recognizer: null,
+                              style: TextStyle(color: primaryBlue, fontWeight: FontWeight.w600),
                             ),
-                            const TextSpan(text: ' and '),
+                            TextSpan(text: ' and '),
                             TextSpan(
                               text: 'Privacy Policy',
-                              style: const TextStyle(
-                                color: primaryBlue,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              recognizer: null,
+                              style: TextStyle(color: primaryBlue, fontWeight: FontWeight.w600),
                             ),
                           ],
                         ),
@@ -602,7 +535,7 @@ class _SignUpPageState extends State<SignUpPage> {
                 ),
                 const SizedBox(height: 20),
 
-                // Create Account button
+                // Create Account Button
                 SizedBox(
                   width: double.infinity,
                   height: 52,
@@ -610,9 +543,7 @@ class _SignUpPageState extends State<SignUpPage> {
                     onPressed: _isSubmitting ? null : _handleCreateAccount,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: primaryBlue,
-                      disabledBackgroundColor: primaryBlue.withValues(
-                        alpha: 0.4,
-                      ),
+                      disabledBackgroundColor: primaryBlue.withValues(alpha: 0.4),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
@@ -637,50 +568,9 @@ class _SignUpPageState extends State<SignUpPage> {
                           ),
                   ),
                 ),
-                const SizedBox(height: 20),
-
-                // OR divider
-                Row(
-                  children: [
-                    Expanded(child: Divider(color: Colors.grey.shade300)),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text(
-                        'OR',
-                        style: TextStyle(
-                          color: const Color.fromARGB(255, 148, 147, 147),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                    Expanded(child: Divider(color: Colors.grey.shade300)),
-                  ],
-                ),
-                const SizedBox(height: 20),
-
-                // Social buttons
-                _SocialButton(
-                  icon: Icons.g_mobiledata,
-                  iconColor: Colors.redAccent,
-                  label: 'Continue with Google',
-                  onTap: _handleGoogleSignup,
-                ),
-                const SizedBox(height: 12),
-                _SocialButton(
-                  icon: Icons.business,
-                  iconColor: const Color(0xFF0A66C2),
-                  label: 'Continue with LinkedIn',
-                  onTap: () {},
-                ),
-                const SizedBox(height: 12),
-                _SocialButton(
-                  icon: Icons.sms_outlined,
-                  iconColor: primaryBlue,
-                  label: 'Continue with Phone OTP',
-                  onTap: () {},
-                ),
                 const SizedBox(height: 24),
 
+                // Already have an account? Login
                 Center(
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -693,16 +583,9 @@ class _SignUpPageState extends State<SignUpPage> {
                         onPressed: () {
                           Navigator.pushReplacement(
                             context,
-                            MaterialPageRoute(
-                              builder: (context) => const LoginPage(),
-                            ),
+                            MaterialPageRoute(builder: (_) => const LoginPage()),
                           );
                         },
-                        style: TextButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
                         child: const Text(
                           'Login',
                           style: TextStyle(
@@ -720,6 +603,18 @@ class _SignUpPageState extends State<SignUpPage> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _fieldLabel(String text) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        color: Colors.black87,
+        letterSpacing: 0.5,
       ),
     );
   }
@@ -744,68 +639,9 @@ class _SignUpPageState extends State<SignUpPage> {
         borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide.none,
       ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFF1959F6), width: 1.4),
-      ),
-    );
-  }
-}
-
-class _FieldLabel extends StatelessWidget {
-  final String text;
-  final Color color;
-  const _FieldLabel(this.text, this.color);
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w600,
-        color: color,
-        letterSpacing: 0.5,
-      ),
-    );
-  }
-}
-
-class _SocialButton extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String label;
-  final VoidCallback onTap;
-
-  const _SocialButton({
-    required this.icon,
-    required this.iconColor,
-    required this.label,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 50,
-      child: OutlinedButton.icon(
-        onPressed: onTap,
-        style: OutlinedButton.styleFrom(
-          side: BorderSide(color: Colors.grey.shade300),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        icon: Icon(icon, color: iconColor, size: 20),
-        label: Text(
-          label,
-          style: const TextStyle(
-            color: Colors.black87,
-            fontWeight: FontWeight.w500,
-            fontSize: 14,
-          ),
-        ),
+      focusedBorder: const OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(12)),
+        borderSide: BorderSide(color: AppColors.primaryBlue, width: 1.4),
       ),
     );
   }

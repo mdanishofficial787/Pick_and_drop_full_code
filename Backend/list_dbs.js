@@ -1,0 +1,1 @@
+const mongoose = require('mongoose'); mongoose.connect('mongodb+srv://sadiarafiquedev_db_user:KhmXmAyYP9SxabFR@cluster0.yhrbvje.mongodb.net/?appName=Cluster0').then(async () => { const admin = mongoose.connection.db.admin(); const dbs = await admin.listDatabases(); console.log(JSON.stringify(dbs.databases, null, 2)); process.exit(0); });

@@ -26,8 +26,9 @@ const customerSchema = new mongoose.Schema(
     Email: {
       type: String,
       required: true,
-      // unique: true,
-      lowercase: true
+      unique: true,
+      lowercase: true,
+      trim: true
     },
     googleId: {
     type: String,

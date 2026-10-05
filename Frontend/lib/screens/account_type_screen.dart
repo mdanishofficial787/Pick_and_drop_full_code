@@ -34,189 +34,210 @@ class _AccountTypeScreenState extends State<AccountTypeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F9FE),
+
       body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 20),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 46, vertical: 30),
 
-                  // =================================================
-                  // LOGO
-                  // =================================================
-                  SizedBox(
-                    width: 160,
-                    height: 90,
-                    child: Image.asset(
-                      'assets/images/rns_logo.png',
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) {
-                        return const Icon(
-                          Icons.directions_car,
-                          size: 70,
-                          color: Color(0xFF102A52),
-                        );
-                      },
-                    ),
+            child: Column(
+              children: [
+                const SizedBox(height: 85),
+
+                // =================================================
+                // LOGO
+                // =================================================
+                SizedBox(
+                  width: 250,
+                  height: 150,
+
+                  child: Image.asset(
+                    'assets/images/rns_logo.png',
+
+                    fit: BoxFit.contain,
+
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Icon(
+                        Icons.directions_car,
+                        size: 130,
+                        color: Color(0xFF102A52),
+                      );
+                    },
                   ),
+                ),
 
-                  const SizedBox(height: 12),
+                const SizedBox(height: 20),
 
-                  // =================================================
-                  // TAGLINE
-                  // =================================================
-                  const Text(
-                    'Ride, Serve, Connect.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF096CFA),
-                      letterSpacing: 0.5,
-                    ),
+                // =================================================
+                // TAGLINE
+                // =================================================
+                const Text(
+                  'Ride, Serve, Connect.',
+
+                  textAlign: TextAlign.center,
+
+                  style: TextStyle(
+                    fontSize: 39,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF096CFA),
                   ),
+                ),
 
-                  const SizedBox(height: 28),
+                const SizedBox(height: 80),
 
-                  // =================================================
-                  // WELCOME
-                  // =================================================
-                  const Text(
-                    'Welcome!',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF171A1F),
-                    ),
+                // =================================================
+                // WELCOME
+                // =================================================
+                const Text(
+                  'Welcome!',
+
+                  style: TextStyle(
+                    fontSize: 47,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF171A1F),
                   ),
+                ),
 
-                  const SizedBox(height: 8),
+                const SizedBox(height: 20),
 
-                  const Text(
-                    'Choose your account type to continue',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: Color(0xFF565E6D),
-                    ),
-                  ),
+                const Text(
+                  'Choose your account type to continue',
 
-                  const SizedBox(height: 32),
+                  textAlign: TextAlign.center,
 
-                  // =================================================
-                  // CUSTOMER + DRIVER CARDS
-                  // =================================================
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _AccountCard(
-                          title: 'Customer',
-                          subtitle: 'Book rides & travel safely',
-                          icon: Icons.groups_outlined,
-                          selected: _selectedAccount == AccountType.customer,
-                          onTap: () {
-                            setState(() {
-                              _selectedAccount = AccountType.customer;
-                            });
-                          },
-                        ),
+                  style: TextStyle(fontSize: 27, color: Color(0xFF454D62)),
+                ),
+
+                const SizedBox(height: 90),
+
+                // =================================================
+                // CUSTOMER + DRIVER
+                // =================================================
+                Row(
+                  children: [
+                    Expanded(
+                      child: _AccountCard(
+                        title: 'Customer',
+
+                        icon: Icons.groups_outlined,
+
+                        selected: _selectedAccount == AccountType.customer,
+
+                        onTap: () {
+                          setState(() {
+                            _selectedAccount = AccountType.customer;
+                          });
+                        },
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: _AccountCard(
-                          title: 'Driver',
-                          subtitle: 'Drive & earn on schedule',
-                          icon: Icons.person_outline,
-                          selected: _selectedAccount == AccountType.driver,
-                          onTap: () {
-                            setState(() {
-                              _selectedAccount = AccountType.driver;
-                            });
-                          },
-                        ),
+                    ),
+
+                    const SizedBox(width: 28),
+
+                    Expanded(
+                      child: _AccountCard(
+                        title: 'Driver',
+
+                        icon: Icons.person_outline,
+
+                        selected: _selectedAccount == AccountType.driver,
+
+                        onTap: () {
+                          setState(() {
+                            _selectedAccount = AccountType.driver;
+                          });
+                        },
                       ),
-                    ],
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 100),
+
+                // =================================================
+                // CONTINUE BUTTON
+                // =================================================
+                SizedBox(
+                  width: double.infinity,
+                  height: 116,
+
+                  child: ElevatedButton(
+                    onPressed: _continue,
+
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0878F9),
+
+                      foregroundColor: Colors.white,
+
+                      elevation: 5,
+
+                      shadowColor: Colors.black26,
+
+                      shape: const StadiumBorder(),
+                    ),
+
+                    child: const Text(
+                      'CONTINUE',
+
+                      style: TextStyle(
+                        fontSize: 29,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1,
+                      ),
+                    ),
                   ),
+                ),
 
-                  const SizedBox(height: 36),
+                const SizedBox(height: 60),
 
-                  // =================================================
-                  // CONTINUE BUTTON
-                  // =================================================
-                  SizedBox(
-                    width: double.infinity,
-                    height: 54,
-                    child: ElevatedButton(
-                      onPressed: _continue,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0878F9),
-                        foregroundColor: Colors.white,
-                        elevation: 3,
-                        shadowColor: const Color(0x330878F9),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
+                // =================================================
+                // TERMS
+                // =================================================
+                Wrap(
+                  alignment: WrapAlignment.center,
+
+                  children: [
+                    const Text(
+                      'By continuing, you agree to our ',
+
+                      style: TextStyle(fontSize: 21, color: Color(0xFF4A5362)),
+                    ),
+
+                    GestureDetector(
+                      onTap: () {},
+
                       child: const Text(
-                        'CONTINUE',
+                        'Terms',
+
                         style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.8,
+                          fontSize: 21,
+                          color: Color(0xFF0878F9),
                         ),
                       ),
                     ),
-                  ),
 
-                  const SizedBox(height: 24),
+                    const Text(
+                      ' & ',
 
-                  // =================================================
-                  // TERMS
-                  // =================================================
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      const Text(
-                        'By continuing, you agree to our ',
-                        style: TextStyle(fontSize: 13, color: Color(0xFF565E6D)),
-                      ),
-                      GestureDetector(
-                        onTap: () {},
-                        child: const Text(
-                          'Terms',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF0878F9),
-                          ),
+                      style: TextStyle(fontSize: 21, color: Color(0xFF4A5362)),
+                    ),
+
+                    GestureDetector(
+                      onTap: () {},
+
+                      child: const Text(
+                        'Privacy Policy',
+
+                        style: TextStyle(
+                          fontSize: 21,
+                          color: Color(0xFF0878F9),
                         ),
                       ),
-                      const Text(
-                        ' & ',
-                        style: TextStyle(fontSize: 13, color: Color(0xFF565E6D)),
-                      ),
-                      GestureDetector(
-                        onTap: () {},
-                        child: const Text(
-                          'Privacy Policy',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF0878F9),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
+                ),
 
-                  const SizedBox(height: 16),
-                ],
-              ),
+                const SizedBox(height: 25),
+              ],
             ),
           ),
         ),
@@ -231,14 +252,12 @@ class _AccountTypeScreenState extends State<AccountTypeScreen> {
 
 class _AccountCard extends StatelessWidget {
   final String title;
-  final String? subtitle;
   final IconData icon;
   final bool selected;
   final VoidCallback onTap;
 
   const _AccountCard({
     required this.title,
-    this.subtitle,
     required this.icon,
     required this.selected,
     required this.onTap,
@@ -248,108 +267,99 @@ class _AccountCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        height: 195,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+
+        height: 380,
+
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
+
+          borderRadius: BorderRadius.circular(30),
+
           border: Border.all(
-            color: selected ? const Color(0xFF0878F9) : const Color(0xFFE2E8F0),
-            width: selected ? 2.5 : 1,
+            color: selected ? const Color(0xFF0878F9) : Colors.transparent,
+
+            width: selected ? 4 : 0,
           ),
+
           boxShadow: [
             BoxShadow(
-              color: selected
-                  ? const Color(0x1A0878F9)
-                  : Colors.black.withValues(alpha: 0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+              color: Colors.black.withValues(alpha: 0.07),
+
+              blurRadius: 12,
+
+              offset: const Offset(0, 6),
             ),
           ],
         ),
+
         child: Stack(
           children: [
             // ===================================================
-            // CHECK MARK IN CORNER
-            // ===================================================
-            if (selected)
-              Positioned(
-                top: 0,
-                right: 0,
-                child: Container(
-                  width: 24,
-                  height: 24,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF0878F9),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.check, color: Colors.white, size: 16),
-                ),
-              ),
-
-            // ===================================================
-            // CENTERED ICON + TITLE
+            // ICON + TITLE
             // ===================================================
             Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.center,
+
                 children: [
                   Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? const Color(0xFFEBF3FF)
-                          : const Color(0xFFF1F5F9),
+                    width: 150,
+                    height: 150,
+
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFE7F0FC),
                       shape: BoxShape.circle,
                     ),
+
                     child: Icon(
                       icon,
-                      size: 38,
+
+                      size: 82,
+
                       color: selected
                           ? const Color(0xFF0878F9)
-                          : const Color(0xFF64748B),
+                          : const Color(0xFF7A828C),
                     ),
                   ),
 
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 58),
 
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      title,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: selected
-                            ? const Color(0xFF0878F9)
-                            : const Color(0xFF1E293B),
-                        letterSpacing: 0.3,
-                      ),
+                  Text(
+                    title,
+
+                    style: const TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF171A1F),
                     ),
                   ),
-
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle!,
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
+
+            // ===================================================
+            // CHECK MARK
+            // ===================================================
+            if (selected)
+              Positioned(
+                top: 22,
+                right: 22,
+
+                child: Container(
+                  width: 50,
+                  height: 50,
+
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF0878F9),
+                    shape: BoxShape.circle,
+                  ),
+
+                  child: const Icon(Icons.check, color: Colors.white, size: 30),
+                ),
+              ),
           ],
         ),
       ),

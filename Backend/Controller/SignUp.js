@@ -53,8 +53,16 @@ console.log("CONFIRM PASSWORD:", confirmPassword);
             });
         }
 
-
         const normalizedEmail = Email.trim().toLowerCase();
+
+        // 3b. Email Duplicate Check
+        const emailExists = await Customer.findOne({ Email: normalizedEmail });
+        if (emailExists) {
+            return res.status(409).json({
+                success: false,
+                message: "An account with this email already exists. Please login instead."
+            });
+        }
 
         // 4. Password Hashing
         const hashedPassword = await bcrypt.hash(
@@ -70,36 +78,32 @@ console.log("CONFIRM PASSWORD:", confirmPassword);
         console.log("File:", req.file);
 
         if (req.file) {
-
-            const result = await new Promise(
-                (resolve, reject) => {
-
-                    const uploadStream =
-                        cloudinary.uploader.upload_stream(
-                            {
-                                folder: "customers",
-                                resource_type: "image"
-                            },
-
-                            (error, result) => {
-
-                                if (error) {
-                                    reject(error);
-                                } else {
-                                    resolve(result);
-                                }
+            try {
+                const result = await new Promise((resolve, reject) => {
+                    const uploadStream = cloudinary.uploader.upload_stream(
+                        {
+                            folder: "customers",
+                            resource_type: "image"
+                        },
+                        (error, result) => {
+                            if (error) {
+                                reject(error);
+                            } else {
+                                resolve(result);
                             }
-                        );
+                        }
+                    );
 
-                    streamifier
-                        .createReadStream(req.file.buffer)
-                        .pipe(uploadStream);
-                }
-            );
+                    streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+                });
 
-            // Save both Cloudinary URL and public_id
-            imageUrl = result.secure_url;
-            imagePublicId = result.public_id;
+                // Save both Cloudinary URL and public_id
+                imageUrl = result.secure_url;
+                imagePublicId = result.public_id;
+                console.log("Cloudinary upload successful:", imageUrl);
+            } catch (cloudErr) {
+                console.warn("Cloudinary upload notice:", cloudErr.message);
+            }
         }
 
 
@@ -234,15 +238,84 @@ return res.status(201).json({
         );
 
         return res.status(500).json({
-
             success: false,
-
-            message:
-                "Internal Server Error",
-
-            error:
-                err.message
-
+            message: "Internal Server Error",
+            error: err.message
         });
     }
+};
+
+module.exports.updateProfile = async (req, res) => {
+  try {
+    const { fullName, Email, PhoneNumber, customerId } = req.body;
+    let userId = req.user ? (req.user._id || req.user.id) : customerId;
+
+    if (!userId && req.body.userId) userId = req.body.userId;
+
+    let user = null;
+    if (userId) {
+      user = await Customer.findById(userId);
+    }
+    if (!user && Email) {
+      user = await Customer.findOne({ Email: Email.trim().toLowerCase() });
+    }
+    if (!user && PhoneNumber) {
+      user = await Customer.findOne({ PhoneNumber: PhoneNumber.trim() });
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Customer account not found"
+      });
+    }
+
+    if (fullName) user.fullName = fullName.trim();
+    if (Email) user.Email = Email.trim().toLowerCase();
+    if (PhoneNumber) user.PhoneNumber = PhoneNumber.trim();
+
+    if (req.file) {
+      try {
+        const result = await new Promise((resolve, reject) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            {
+              folder: "customers",
+              resource_type: "image"
+            },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+        });
+        user.CustomerPhoto = result.secure_url;
+      } catch (uploadErr) {
+        console.warn("Cloudinary upload failed, keeping old photo:", uploadErr.message);
+      }
+    }
+
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      customer: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.Email,
+        phoneNumber: user.PhoneNumber,
+        countryCode: user.countryCode || "+92",
+        CustomerPhoto: user.CustomerPhoto,
+        isVerified: user.isVerified || true
+      }
+    });
+  } catch (err) {
+    console.error("Update Profile Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update profile",
+      error: err.message
+    });
+  }
 };

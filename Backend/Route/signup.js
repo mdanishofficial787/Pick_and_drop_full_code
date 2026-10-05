@@ -46,4 +46,11 @@ router.get(
   checkSession.checkSession
 );
 
+// Update Customer Profile
+router.put(
+  "/update-profile",
+  uploadSingleImage("CustomerPhoto"),
+  signupController.updateProfile
+);
+
 module.exports = router;

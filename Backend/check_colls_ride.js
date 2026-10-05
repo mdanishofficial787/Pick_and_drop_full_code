@@ -1,0 +1,1 @@
+const mongoose = require('mongoose'); mongoose.connect('mongodb+srv://sadiarafiquedev_db_user:KhmXmAyYP9SxabFR@cluster0.yhrbvje.mongodb.net/ride_and_serve?appName=Cluster0').then(async () => { const dbTest = mongoose.connection.useDb('ride_and_serve'); const colls = await dbTest.listCollections(); console.log(colls.map(c => c.name)); process.exit(0); });

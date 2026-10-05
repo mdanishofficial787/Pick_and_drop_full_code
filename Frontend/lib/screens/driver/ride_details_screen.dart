@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'ride_management_screen.dart'; // To access RideInfo
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_phone_direct_caller/flutter_phone_direct_caller.dart';
 import '/api_config.dart';
 
 class RideDetailsScreen extends StatefulWidget {
@@ -154,9 +157,39 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
                         ),
                       ),
                     ),
-                    _buildIconButton(Icons.phone_outlined, () {}),
+                    _buildIconButton(Icons.phone_outlined, () async {
+                      if (kIsWeb) {
+                        final url = Uri.parse('tel:${widget.ride.phone}');
+                        if (await canLaunchUrl(url)) {
+                          await launchUrl(url);
+                        } else {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Could not launch dialer for ${widget.ride.phone}')),
+                          );
+                        }
+                      } else {
+                        bool? res = await FlutterPhoneDirectCaller.callNumber(widget.ride.phone);
+                        if (res == null || !res) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Could not directly call ${widget.ride.phone}')),
+                          );
+                        }
+                      }
+                    }),
                     const SizedBox(width: 8),
-                    _buildIconButton(Icons.chat_bubble_outline, () {}),
+                    _buildIconButton(Icons.chat_bubble_outline, () async {
+                      final url = Uri.parse('sms:${widget.ride.phone}');
+                      if (await canLaunchUrl(url)) {
+                        await launchUrl(url);
+                      } else {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Could not launch SMS app for ${widget.ride.phone}')),
+                        );
+                      }
+                    }),
                   ],
                 ),
               ),
@@ -174,7 +207,17 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.star, color: Color(0xFF1D4ED8), size: 14),
+                      Icon(
+                        widget.ride.scheduleType.toUpperCase() == 'HIRE DRIVER'
+                            ? Icons.person_outline
+                            : (widget.ride.scheduleType.toUpperCase() == 'TRAVEL & TOURISM'
+                                ? Icons.luggage
+                                : (widget.ride.scheduleType.toUpperCase() == 'SCHEDULE RIDE'
+                                    ? Icons.access_time_filled
+                                    : Icons.star)),
+                        color: const Color(0xFF1D4ED8),
+                        size: 14,
+                      ),
                       const SizedBox(width: 6),
                       Text(
                         widget.ride.scheduleType.toUpperCase(),

@@ -1,12 +1,9 @@
-// ignore_for_file: file_names
-
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-import 'package:ride_and_serve/api_config.dart';
+import 'package:ride_and_serve/constants/app_colors.dart';
 import 'package:ride_and_serve/screens/customer/set_new_password_screen.dart';
+import 'package:ride_and_serve/services/auth_service.dart';
 
 /// Verify OTP screen — OTP entry (matches provided reference design)
 class VerifyOtpScreen extends StatefulWidget {
@@ -19,7 +16,7 @@ class VerifyOtpScreen extends StatefulWidget {
 }
 
 class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
-  static const Color _blue = Color(0xFF1652F0);
+  static const Color _blue = AppColors.primaryBlue;
   static const Color _titleColor = Color(0xFF14151A);
   static const Color _subtitleColor = Color(0xFF5C5E66);
   static const Color _fieldBorder = Color(0xFFDADCE3);
@@ -36,8 +33,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
     (_) => FocusNode(),
   );
 
-  final bool _autoFetching =
-      false; // no real auto-fetch wired up yet, so start false
+  final bool _autoFetching = false;
   bool _isVerifying = false;
   bool _isResending = false;
   int _secondsLeft = _resendSeconds;
@@ -67,37 +63,39 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
     setState(() => _isResending = true);
 
     try {
-      final response = await http.post(
-        Uri.parse(kSendOtpEndpoint),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': widget.email}),
+      final response = await AuthService.sendForgotPasswordRequest(
+        email: widget.email,
       );
 
       if (!mounted) return;
 
-      if (response.statusCode == 200) {
+      if (response.isSuccess) {
         for (final c in _controllers) {
           c.clear();
         }
         _focusNodes.first.requestFocus();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('OTP resent to your email')),
+          const SnackBar(
+            content: Text('OTP resent to your email'),
+            backgroundColor: Colors.green,
+          ),
         );
         _startResendTimer();
       } else {
-        String message = 'Failed to resend OTP';
-        try {
-          final body = jsonDecode(response.body);
-          message = body['message'] ?? message;
-        } catch (_) {}
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(message)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(response.message ?? 'Failed to resend OTP'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Network error. Please try again.')),
+        const SnackBar(
+          content: Text('Network error. Please try again.'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
     } finally {
       if (mounted) setState(() => _isResending = false);
@@ -108,7 +106,10 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
     final code = _controllers.map((c) => c.text).join();
     if (code.length < _otpLength) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter the full code')),
+        const SnackBar(
+          content: Text('Please enter the full 6-digit code'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
       return;
     }
@@ -117,52 +118,59 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
     setState(() => _isVerifying = true);
 
     try {
-      final response = await http.post(
-        Uri.parse(kVerifyOtpEndpoint),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': widget.email, 'otp': code}),
+      final response = await AuthService.verifyForgotPasswordOtp(
+        email: widget.email,
+        otp: code,
       );
 
       if (!mounted) return;
 
-      if (response.statusCode == 200) {
-        final body = jsonDecode(response.body);
+      if (response.isSuccess && response.data is Map<String, dynamic>) {
+        final body = response.data as Map<String, dynamic>;
         final resetToken = body['resetToken'] as String?;
+        final customer = body['customer'] as Map<String, dynamic>?;
+        final phoneNumber = customer?['phoneNumber'] as String?;
 
         if (resetToken == null) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text(
-                'Verification succeeded but no reset token was returned',
-              ),
+              content: Text('Verification succeeded but reset token missing'),
+              backgroundColor: Colors.redAccent,
             ),
           );
           return;
         }
 
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('OTP verified')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('OTP verified successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
 
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (context) => ResetPasswordScreen(resetToken: resetToken),
+            builder: (context) => ResetPasswordScreen(
+              resetToken: resetToken,
+              prefilledPhone: phoneNumber,
+            ),
           ),
         );
       } else {
-        String message = 'Invalid or expired OTP';
-        try {
-          final body = jsonDecode(response.body);
-          message = body['message'] ?? message;
-        } catch (_) {}
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(message)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(response.message ?? 'Invalid or expired OTP code'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Network error. Please try again.')),
+        SnackBar(
+          content: Text('Verification error: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
       );
     } finally {
       if (mounted) setState(() => _isVerifying = false);
@@ -191,6 +199,14 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.black87),
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
+      ),
       body: SafeArea(
         child: Column(
           children: [

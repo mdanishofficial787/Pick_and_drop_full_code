@@ -1,30 +1,39 @@
 const express = require("express");
 const router = express.Router();
-const rideController = require("../Controller/RideController");
+const {
+  createMonthlyRide,
+  getAllRides,
+  getRideById,
+  dispatchRide,
+  getCustomerRides,
+  updateRide,
+  reportDriverUnavailable,
+  requestReplacementDriver,
+  getCustomerNotifications,
+  respondToFare
+} = require("../Controller/RideController");
 
-// Customer routes
-router.post("/request", rideController.requestRide);
+// Customer booking
+router.post("/monthly", createMonthlyRide);
+router.post("/", createMonthlyRide);
+router.get("/customer", getCustomerRides);
+router.get("/customer-notifications", getCustomerNotifications);
+router.post("/respond-fare", respondToFare);
+router.post("/:id/respond-fare", respondToFare);
 
-// Admin routes
-router.get("/pending", rideController.getPendingRides);
-router.post("/assign", rideController.assignDriver);
+// Driver Unavailable & Replacement Requests
+router.post("/driver-unavailable", reportDriverUnavailable);
+router.post("/:id/driver-unavailable", reportDriverUnavailable);
+router.post("/request-replacement", requestReplacementDriver);
+router.post("/:id/request-replacement", requestReplacementDriver);
 
-// Driver & Admin Ride routes
-router.get("/", rideController.getAssignedRides);
-router.get("/assigned", rideController.getAssignedRides);
-router.get("/driver/:driverId", rideController.getAssignedRides);
-router.get("/active/customer", rideController.getActiveRide);
-router.get("/active", rideController.getActiveRide);
-router.get("/:rideId", rideController.getRideById);
-router.put("/status/:rideId", rideController.updateRideStatus);
-router.patch("/status/:rideId", rideController.updateRideStatus);
-router.put("/:rideId", rideController.updateRideStatus);
-router.patch("/:rideId/fare", rideController.updateRideFare);
-router.patch("/:rideId", (req, res) => {
-  if (req.body && req.body.fare !== undefined) {
-    return rideController.updateRideFare(req, res);
-  }
-  return rideController.updateRideStatus(req, res);
-});
+// Admin & Dispatch Console
+router.get("/", getAllRides);
+router.get("/dispatch-console", getAllRides);
+router.get("/:id", getRideById);
+router.patch("/:id/dispatch", dispatchRide);
+router.post("/:id/dispatch", dispatchRide);
+router.patch("/:id", updateRide);
+router.put("/:id", updateRide);
 
 module.exports = router;

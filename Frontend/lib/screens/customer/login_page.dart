@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
-//import 'package:ride_and_serve/screens/customer/otp_verification_page.dart';
 import 'package:ride_and_serve/constants/app_colors.dart';
-import 'dart:convert';
+import 'package:ride_and_serve/screens/customer/customer_dashboard_screen.dart';
 import 'package:ride_and_serve/screens/customer/forgot_password.dart';
-
-import 'package:http/http.dart' as http;
-import 'package:ride_and_serve/screens/customer/customer_ride_tracking_screen.dart';
-import '/api_config.dart';
+import 'package:ride_and_serve/screens/customer/signup_page.dart';
+import 'package:ride_and_serve/services/auth_service.dart';
 
 class LoginPage extends StatefulWidget {
   final bool showSuccessBanner;
+  final String? prefilledPhone;
+  final String? prefilledPassword;
 
-  const LoginPage({super.key, this.showSuccessBanner = true});
+  const LoginPage({
+    super.key,
+    this.showSuccessBanner = true,
+    this.prefilledPhone,
+    this.prefilledPassword,
+  });
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -19,13 +23,20 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
-  final _phoneController = TextEditingController();
-  final _passwordController = TextEditingController();
+  late final TextEditingController _phoneController;
+  late final TextEditingController _passwordController;
 
   bool _obscurePassword = true;
   bool _rememberMe = false;
   bool _isSubmitting = false;
   String _countryCode = '+92';
+
+  @override
+  void initState() {
+    super.initState();
+    _phoneController = TextEditingController(text: widget.prefilledPhone ?? '');
+    _passwordController = TextEditingController(text: widget.prefilledPassword ?? '');
+  }
 
   @override
   void dispose() {
@@ -39,7 +50,7 @@ class _LoginPageState extends State<LoginPage> {
       return 'Phone number is required';
     }
     final digitsOnly = value.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digitsOnly.length < 9) return 'Enter a valid phone number';
+    if (digitsOnly.length < 7) return 'Enter a valid phone number';
     return null;
   }
 
@@ -50,35 +61,20 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _handleLogin() async {
     final isValid = _formKey.currentState?.validate() ?? false;
-
     if (!isValid) return;
 
     setState(() => _isSubmitting = true);
 
     try {
-      final uri = Uri.parse("$kBaseUrl/api/auth/login");
-
-      final response = await http.post(
-        uri,
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "PhoneNumber": _phoneController.text.trim(),
-          "countryCode": _countryCode,
-          "Password": _passwordController.text,
-        }),
+      final response = await AuthService.login(
+        phoneNumber: _phoneController.text.trim(),
+        countryCode: _countryCode,
+        password: _passwordController.text,
       );
 
       if (!mounted) return;
 
-      final responseData = jsonDecode(response.body);
-
-      debugPrint("LOGIN STATUS: ${response.statusCode}");
-      debugPrint("LOGIN RESPONSE: ${response.body}");
-
-      // =========================
-      // LOGIN SUCCESS
-      // =========================
-      if (response.statusCode == 200 && responseData["success"] == true) {
+      if (response.success && response.customer != null) {
         showDialog(
           context: context,
           barrierDismissible: false,
@@ -101,9 +97,7 @@ class _LoginPageState extends State<LoginPage> {
                         size: 50,
                       ),
                     ),
-
                     const SizedBox(height: 20),
-
                     const Text(
                       "Login Successful",
                       style: TextStyle(
@@ -111,17 +105,13 @@ class _LoginPageState extends State<LoginPage> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-
                     const SizedBox(height: 12),
-
-                    const Text(
-                      "You have been logged in successfully.",
+                    Text(
+                      "Welcome back, ${response.customer?.fullName ?? 'User'}!",
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 14, color: Colors.black54),
+                      style: const TextStyle(fontSize: 14, color: Colors.black54),
                     ),
-
                     const SizedBox(height: 25),
-
                     SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -133,16 +123,15 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                         ),
                         onPressed: () {
-                          Navigator.pop(context); // Close dialog
-                          Navigator.pushReplacement(
+                          Navigator.pop(context);
+                          Navigator.pushAndRemoveUntil(
                             context,
                             MaterialPageRoute(
-                              builder: (context) =>
-                                  CustomerRideTrackingScreen(
-                                customerPhone:
-                                    _phoneController.text.trim(),
+                              builder: (_) => CustomerDashboardScreen(
+                                user: response.customer,
                               ),
                             ),
+                            (route) => false,
                           );
                         },
                         child: const Text(
@@ -160,24 +149,12 @@ class _LoginPageState extends State<LoginPage> {
             );
           },
         );
-      }
-      // =========================
-      // LOGIN FAILED
-      // =========================
-      else {
-        final message =
-            responseData["message"] ?? "Invalid phone number or password";
-
-        _showLoginErrorDialog(message);
+      } else {
+        _showLoginErrorDialog(response.message);
       }
     } catch (e) {
       if (!mounted) return;
-
-      _showLoginErrorDialog(
-        "Unable to connect to the server. Please try again.",
-      );
-
-      debugPrint("LOGIN ERROR: $e");
+      _showLoginErrorDialog("Unable to connect to the server: $e");
     } finally {
       if (mounted) {
         setState(() => _isSubmitting = false);
@@ -204,24 +181,18 @@ class _LoginPageState extends State<LoginPage> {
                   backgroundColor: Color(0xFFFFEBEE),
                   child: Icon(Icons.error_outline, color: Colors.red, size: 50),
                 ),
-
                 const SizedBox(height: 20),
-
                 const Text(
                   "Login Failed",
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                 ),
-
                 const SizedBox(height: 12),
-
                 Text(
                   message,
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 14, color: Colors.black54),
                 ),
-
                 const SizedBox(height: 25),
-
                 SizedBox(
                   width: double.infinity,
                   height: 50,
@@ -232,9 +203,7 @@ class _LoginPageState extends State<LoginPage> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    onPressed: () {
-                      Navigator.pop(context);
-                    },
+                    onPressed: () => Navigator.pop(context),
                     child: const Text(
                       "TRY AGAIN",
                       style: TextStyle(
@@ -259,7 +228,6 @@ class _LoginPageState extends State<LoginPage> {
       body: SafeArea(
         child: Stack(
           children: [
-            // Centered scrollable content
             LayoutBuilder(
               builder: (context, constraints) {
                 return SingleChildScrollView(
@@ -276,6 +244,7 @@ class _LoginPageState extends State<LoginPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
+                            const SizedBox(height: 40),
                             // App icon
                             Center(
                               child: Container(
@@ -293,10 +262,9 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ),
                             const SizedBox(height: 16),
-
                             const Center(
                               child: Text(
-                                'Login',
+                                'Customer Login',
                                 style: TextStyle(
                                   fontSize: 24,
                                   fontWeight: FontWeight.w700,
@@ -304,9 +272,7 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 20),
-
-                            // Success banner
+                            const SizedBox(height: 24),
 
                             // Phone Number
                             const Text(
@@ -320,15 +286,13 @@ class _LoginPageState extends State<LoginPage> {
                             const SizedBox(height: 8),
                             Container(
                               decoration: BoxDecoration(
-                                color: const Color.fromRGBO(245, 246, 248, 1),
+                                color: const Color(0xFFF5F6F8),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Row(
                                 children: [
                                   Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                    ),
+                                    padding: const EdgeInsets.symmetric(horizontal: 12),
                                     child: DropdownButtonHideUnderline(
                                       child: DropdownButton<String>(
                                         value: _countryCode,
@@ -370,14 +334,9 @@ class _LoginPageState extends State<LoginPage> {
                                       textInputAction: TextInputAction.next,
                                       validator: _phoneValidator,
                                       decoration: const InputDecoration(
-                                        hintText: 'Phone Number',
+                                        hintText: '300 1234567',
                                         hintStyle: TextStyle(
-                                          color: Color.fromARGB(
-                                            96,
-                                            253,
-                                            251,
-                                            251,
-                                          ),
+                                          color: Colors.black38,
                                         ),
                                         border: InputBorder.none,
                                         contentPadding: EdgeInsets.symmetric(
@@ -409,12 +368,12 @@ class _LoginPageState extends State<LoginPage> {
                               validator: _passwordValidator,
                               onFieldSubmitted: (_) => _handleLogin(),
                               decoration: InputDecoration(
-                                hintText: 'Password',
+                                hintText: 'Enter your password',
                                 hintStyle: const TextStyle(
                                   color: Colors.black38,
                                 ),
                                 filled: true,
-                                fillColor: Color.fromRGBO(245, 246, 248, 1),
+                                fillColor: const Color(0xFFF5F6F8),
                                 contentPadding: const EdgeInsets.symmetric(
                                   horizontal: 16,
                                   vertical: 14,
@@ -450,26 +409,49 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                             const SizedBox(height: 12),
 
-                            // Remember Me
+                            // Remember Me & Forgot Password
                             Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: Checkbox(
-                                    value: _rememberMe,
-                                    activeColor: AppColors.primaryBlue,
-                                    onChanged: (val) => setState(
-                                      () => _rememberMe = val ?? false,
+                                Row(
+                                  children: [
+                                    SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: Checkbox(
+                                        value: _rememberMe,
+                                        activeColor: AppColors.primaryBlue,
+                                        onChanged: (val) => setState(
+                                          () => _rememberMe = val ?? false,
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      'Remember Me',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 8),
-                                const Text(
-                                  'Remember Me',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.black87,
+                                TextButton(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => const ForgotPasswordScreen(),
+                                      ),
+                                    );
+                                  },
+                                  child: const Text(
+                                    'Forgot Password?',
+                                    style: TextStyle(
+                                      color: AppColors.primaryBlue,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -484,8 +466,7 @@ class _LoginPageState extends State<LoginPage> {
                                 onPressed: _isSubmitting ? null : _handleLogin,
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: AppColors.primaryBlue,
-                                  disabledBackgroundColor: AppColors.primaryBlue
-                                      .withValues(alpha: 0.4),
+                                  disabledBackgroundColor: AppColors.primaryBlue.withValues(alpha: 0.4),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(14),
                                   ),
@@ -510,28 +491,34 @@ class _LoginPageState extends State<LoginPage> {
                                       ),
                               ),
                             ),
-                            const SizedBox(height: 16),
+                            const SizedBox(height: 24),
 
-                            // Forgot Password
+                            // Don't have an account? Sign Up
                             Center(
-                              child: TextButton(
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          const ForgotPasswordScreen(),
-                                    ),
-                                  );
-                                },
-                                child: const Text(
-                                  'Forgot Password?',
-                                  style: TextStyle(
-                                    color: AppColors.primaryBlue,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text(
+                                    "Don't have an account? ",
+                                    style: TextStyle(fontSize: 13, color: Colors.black54),
                                   ),
-                                ),
+                                  TextButton(
+                                    onPressed: () {
+                                      Navigator.pushReplacement(
+                                        context,
+                                        MaterialPageRoute(builder: (_) => const SignUpPage()),
+                                      );
+                                    },
+                                    child: const Text(
+                                      'Register',
+                                      style: TextStyle(
+                                        color: AppColors.primaryBlue,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                             const SizedBox(height: 24),
@@ -544,7 +531,7 @@ class _LoginPageState extends State<LoginPage> {
               },
             ),
 
-            // Pinned back arrow (top-left)
+            // Pinned back arrow
             Positioned(
               top: 8,
               left: 24,
@@ -557,8 +544,6 @@ class _LoginPageState extends State<LoginPage> {
                 ),
               ),
             ),
-
-            // Pinned avatar (top-right)
           ],
         ),
       ),

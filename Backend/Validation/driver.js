@@ -107,22 +107,5 @@ const DriverValidationSchema = Joi.object({
         "Background check consent is required",
     }),
 }).unknown(true);
-// at the bottom of Validation/driver.js, before module.exports
-const DriverUpdateSchema = DriverValidationSchema.fork(
-  [
-    "Name",
-    "PhoneNumber",
-    "Email",
-    "CnicNumber",
-    "Password",
-    "ConfirmPassword",
-    "License",
-    "LicenseExpiryDate",
-    "backgroundCheckConsent",
-  ],
-  (schema) => schema.optional()
-);
 
 module.exports = DriverValidationSchema;
-module.exports.DriverUpdateSchema = DriverUpdateSchema;
-

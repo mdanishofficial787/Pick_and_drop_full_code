@@ -1,0 +1,1 @@
+const mongoose = require('mongoose'); const Driver = require('./schema/Driver'); mongoose.connect('mongodb+srv://sadiarafiquedev_db_user:KhmXmAyYP9SxabFR@cluster0.yhrbvje.mongodb.net/ride_and_serve?appName=Cluster0').then(async () => { const count = await Driver.countDocuments(); console.log('Total drivers in ride_and_serve:', count); process.exit(0); });

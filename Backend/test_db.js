@@ -1,0 +1,1 @@
+require('dotenv').config(); const mongoose = require('mongoose'); const Driver = require('./schema/Driver'); mongoose.connect(process.env.MONGO_URL).then(async () => { const count = await Driver.countDocuments(); console.log('Total drivers:', count); process.exit(0); });

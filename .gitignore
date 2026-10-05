@@ -1,2 +1,26 @@
-.env
-node_modules
+# Backend ignores
+Backend/node_modules/
+Backend/.env
+Backend/*.log
+Backend/migrate_db.js
+Backend/fix_indexes.js
+
+# Frontend ignores
+Frontend/.dart_tool/
+Frontend/.flutter-plugins
+Frontend/.flutter-plugins-dependencies
+Frontend/.pub/
+Frontend/.pub-cache/
+Frontend/build/
+Frontend/coverage/
+Frontend/.idea/
+Frontend/*.log
+Frontend/android/app/debug/
+Frontend/android/app/profile/
+Frontend/android/app/release/
+
+# Root ignores
+.idea/
+.vscode/
+*.log
+.DS_Store

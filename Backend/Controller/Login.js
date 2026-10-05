@@ -28,31 +28,9 @@ module.exports.login = async (req, res) => {
             });
         }
 
-        // 2. Normalize and find customer flexibly
-        const cleanPhone = PhoneNumber.toString().trim();
-        const rawDigits = cleanPhone.replace(/\D/g, '');
-        let nationalDigits = rawDigits;
-        if (nationalDigits.startsWith('92')) {
-            nationalDigits = nationalDigits.slice(2);
-        }
-        if (nationalDigits.startsWith('0')) {
-            nationalDigits = nationalDigits.replace(/^0+/, '');
-        }
-
-        const possibleCustomerPhones = [
-            cleanPhone,
-            nationalDigits,
-            `0${nationalDigits}`,
-            `+92${nationalDigits}`,
-            `+92 ${nationalDigits}`,
-            `92${nationalDigits}`
-        ];
-
+        // 2. Find customer
         const customer = await Customer.findOne({
-            $or: [
-                { PhoneNumber: { $in: possibleCustomerPhones } },
-                { PhoneNumber: new RegExp(nationalDigits + '$') }
-            ]
+            PhoneNumber: PhoneNumber.trim()
         });
 
         // 3. Customer doesn't exist
@@ -134,6 +112,10 @@ module.exports.login = async (req, res) => {
 };
 
 
+
+// =====================================================
+// GOOGLE SIGNUP / LOGIN
+// =====================================================
 
 module.exports.googleSignup = async (req, res) => {
     try {

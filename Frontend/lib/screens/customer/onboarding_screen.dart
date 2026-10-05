@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:ride_and_serve/screens/customer/signup_page.dart';
+import 'package:ride_and_serve/constants/app_colors.dart';
 import 'package:ride_and_serve/screens/customer/login_page.dart';
+import 'package:ride_and_serve/screens/customer/signup_page.dart';
 
 class OnboardingScreen extends StatelessWidget {
   const OnboardingScreen({super.key});
@@ -8,49 +9,52 @@ class OnboardingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Column(
           children: [
-            // ==========================
-            // Top Purple Section
-            // ==========================
+            // Top Section with gradient & illustration
             Expanded(
               child: Container(
                 width: double.infinity,
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [Color(0xff7C3AED), Color(0xff6D28D9)],
+                    colors: [Color(0xFF1A56DB), Color(0xFF1341B3)],
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                   ),
                 ),
                 child: Center(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
                     child: Image.asset(
                       "assets/images/onboarding.png",
-                      fit: BoxFit.cover,
-                      width: double.infinity,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) {
+                        return const Icon(
+                          Icons.directions_car_filled_rounded,
+                          size: 90,
+                          color: Colors.white,
+                        );
+                      },
                     ),
                   ),
                 ),
               ),
             ),
 
-            // ==========================
-            // Bottom White Card
-            // ==========================
+            // Bottom Card
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 28),
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
               decoration: const BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(35)),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black12,
-                    blurRadius: 18,
-                    offset: Offset(0, -5),
+                    blurRadius: 20,
+                    offset: Offset(0, -6),
                   ),
                 ],
               ),
@@ -61,26 +65,22 @@ class OnboardingScreen extends StatelessWidget {
                     "Get Instant Ride Confirmation",
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 26,
+                      fontSize: 24,
                       fontWeight: FontWeight.bold,
-                      color: Colors.black87,
+                      color: AppColors.textPrimary,
                     ),
                   ),
-
                   const SizedBox(height: 12),
-
                   const Text(
-                    "We'll match you with the nearest driver for the fastest response.",
+                    "Match with nearby verified drivers for daily school, college, and office pick & drop.",
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 15,
-                      height: 1.5,
+                      color: AppColors.textSecondary,
+                      fontSize: 14.5,
+                      height: 1.45,
                     ),
                   ),
-
                   const SizedBox(height: 24),
-
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -91,66 +91,61 @@ class OnboardingScreen extends StatelessWidget {
                       _dot(false),
                     ],
                   ),
+                  const SizedBox(height: 28),
 
-                  const SizedBox(height: 30),
-
+                  // Login Button
                   SizedBox(
                     width: double.infinity,
-                    height: 56,
+                    height: 52,
                     child: ElevatedButton(
                       onPressed: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (context) => const LoginPage(),
-                          ),
+                          MaterialPageRoute(builder: (_) => const LoginPage()),
                         );
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xff7C3AED),
+                        backgroundColor: AppColors.primaryBlue,
+                        foregroundColor: Colors.white,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
+                          borderRadius: BorderRadius.circular(14),
                         ),
                       ),
                       child: const Text(
                         "Login",
                         style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
                   ),
+                  const SizedBox(height: 14),
 
-                  const SizedBox(height: 15),
-
+                  // Register Button
                   SizedBox(
                     width: double.infinity,
-                    height: 56,
+                    height: 52,
                     child: OutlinedButton(
                       onPressed: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (context) => const SignUpPage(),
-                          ),
+                          MaterialPageRoute(builder: (_) => const SignUpPage()),
                         );
                       },
                       style: OutlinedButton.styleFrom(
-                        backgroundColor: const Color(0xffF2EDFF),
-                        side: BorderSide.none,
+                        foregroundColor: AppColors.primaryBlue,
+                        side: const BorderSide(color: AppColors.primaryBlue, width: 1.5),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15),
+                          borderRadius: BorderRadius.circular(14),
                         ),
                       ),
                       child: const Text(
                         "Register",
                         style: TextStyle(
-                          color: Color(0xff7C3AED),
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
@@ -170,7 +165,7 @@ class OnboardingScreen extends StatelessWidget {
       width: active ? 24 : 8,
       height: 8,
       decoration: BoxDecoration(
-        color: active ? const Color(0xff7C3AED) : Colors.grey.shade300,
+        color: active ? AppColors.primaryBlue : Colors.grey.shade300,
         borderRadius: BorderRadius.circular(20),
       ),
     );

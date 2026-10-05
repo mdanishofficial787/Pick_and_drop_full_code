@@ -9,6 +9,12 @@ router.post(
     forgotPasswordController.sendForgotPasswordOtp
 );
 
+// Verify OTP for password reset
+router.post(
+    "/forgot-password/verify-otp",
+    forgotPasswordController.verifyForgotPasswordOtp
+);
+
 // Check password reset status
 router.get(
     "/forgot-password/status",

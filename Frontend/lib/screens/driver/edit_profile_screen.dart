@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:typed_data';
 import '/api_config.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:http_parser/http_parser.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final String driverName;
@@ -36,6 +39,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   // Which field is currently in edit mode
   String? _editingField;
+  XFile? _newProfilePic;
 
   @override
   void initState() {
@@ -63,7 +67,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         headers['Authorization'] = 'Bearer ${widget.token}';
       }
       final res = await http.get(
-        Uri.parse('$kBaseUrl/api/driver/${widget.driverId}'),
+        Uri.parse('$kBaseUrl/driver/${widget.driverId}'),
         headers: headers,
       );
       if (res.statusCode == 200) {
@@ -95,15 +99,47 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ${widget.token}',
     };
-    final res = await http.patch(
-      Uri.parse('$kBaseUrl/api/driver/${widget.driverId}'),
-      headers: headers,
-      body: jsonEncode({
-        'Name': _nameController.text.trim(),
-        'Email': _emailController.text.trim(),
-        'PhoneNumber': _phoneController.text.trim(),
-      }),
-    );
+    http.Response res;
+    if (_newProfilePic != null) {
+      final request = http.MultipartRequest('PATCH', Uri.parse('$kBaseUrl/driver/${widget.driverId}'));
+      request.headers.addAll({'Authorization': 'Bearer ${widget.token}'});
+      final nameVal = _nameController.text.trim();
+      final emailVal = _emailController.text.trim();
+      final phoneVal = _phoneController.text.trim();
+      
+      if (nameVal.isNotEmpty) request.fields['Name'] = nameVal;
+      if (emailVal.isNotEmpty) request.fields['Email'] = emailVal;
+      if (phoneVal.isNotEmpty) request.fields['PhoneNumber'] = phoneVal;
+
+      final bytes = await _newProfilePic!.readAsBytes();
+      String name = _newProfilePic!.name.isNotEmpty ? _newProfilePic!.name : 'profilePic.jpg';
+      final ext = name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+
+      request.files.add(http.MultipartFile.fromBytes(
+        'driverPhoto',
+        bytes,
+        filename: name,
+        contentType: MediaType('image', ext),
+      ));
+
+      final streamedResponse = await request.send();
+      res = await http.Response.fromStream(streamedResponse);
+    } else {
+      final Map<String, dynamic> bodyData = {};
+      final nameVal = _nameController.text.trim();
+      final emailVal = _emailController.text.trim();
+      final phoneVal = _phoneController.text.trim();
+      
+      if (nameVal.isNotEmpty) bodyData['Name'] = nameVal;
+      if (emailVal.isNotEmpty) bodyData['Email'] = emailVal;
+      if (phoneVal.isNotEmpty) bodyData['PhoneNumber'] = phoneVal;
+
+      res = await http.patch(
+        Uri.parse('$kBaseUrl/driver/${widget.driverId}'),
+        headers: headers,
+        body: jsonEncode(bodyData),
+      );
+    }
 
     debugPrint('PATCH ${res.statusCode}: ${res.body}'); // <-- see exactly what the server says
 
@@ -127,6 +163,72 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
   if (mounted) setState(() => _isSaving = false);
 }
+  Future<void> _pickImage(ImageSource source) async {
+    final XFile? file = await ImagePicker().pickImage(
+      source: source,
+      imageQuality: 85,
+    );
+    if (file != null) {
+      setState(() => _newProfilePic = file);
+    }
+  }
+
+  void _showImagePickerModal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Update Profile Photo',
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF111827),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(Icons.camera_alt_rounded, color: Color(0xFF1959F6)),
+                  title: Text('Take Photo with Camera', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickImage(ImageSource.camera);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_library_rounded, color: Color(0xFF1959F6)),
+                  title: Text('Choose from Gallery', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickImage(ImageSource.gallery);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   void _showSnack(String msg, {bool isError = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -176,11 +278,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               ),
                               child: ClipOval(child: _buildProfileImage()),
                             ),
-                            Container(
-                              width: 28,
-                              height: 28,
-                              decoration: BoxDecoration(color: const Color(0xFF1959F6), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
-                              child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 14),
+                            GestureDetector(
+                              onTap: _showImagePickerModal,
+                              child: Container(
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(color: const Color(0xFF1959F6), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                                child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 14),
+                              ),
                             ),
                           ],
                         ),
@@ -252,6 +357,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Widget _buildProfileImage() {
+    if (_newProfilePic != null) {
+      return FutureBuilder<Uint8List>(
+        future: _newProfilePic!.readAsBytes(),
+        builder: (context, snapshot) {
+          if (snapshot.hasData) {
+            return Image.memory(
+              snapshot.data!,
+              fit: BoxFit.cover,
+              width: 90,
+              height: 90,
+            );
+          }
+          return _defaultAvatar();
+        },
+      );
+    }
     if (widget.profilePic != null && widget.profilePic!.isNotEmpty) {
       return Image.network(widget.profilePic!, fit: BoxFit.cover, width: 90, height: 90, errorBuilder: (_, __, ___) => _defaultAvatar());
     }

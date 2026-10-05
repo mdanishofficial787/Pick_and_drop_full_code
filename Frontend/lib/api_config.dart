@@ -1,23 +1,24 @@
-import 'package:flutter/foundation.dart';
+import 'package:ride_and_serve/constants/api_constants.dart';
 
-// --- ACTIVE TARGET BACKEND IP ---
-// Active Wi-Fi IP is 192.168.88.59. On browser/web, localhost:3000 connects directly.
-const String _kHost = kIsWeb ? 'http://localhost:3000' : 'http://192.168.88.59:3000';
+// Central place for backend base URL and endpoints
+String get kBaseUrl => ApiConstants.baseUrl;
 
-const String kBaseUrl = _kHost;
-const String kDispatchBaseUrl = _kHost;
+String get kCustomerSignupEndpoint => ApiConstants.customerSignup;
+String get kCustomerLoginEndpoint => ApiConstants.customerLogin;
+String get kCustomerGoogleEndpoint => ApiConstants.customerGoogleAuth;
+String get kVerifyCustomerOtpEndpoint => ApiConstants.customerVerifyOtp;
+String get kResendCustomerOtpEndpoint => ApiConstants.customerResendOtp;
 
-const String kSendOtpEndpoint = '$kBaseUrl/api/auth/forgot-password/send-otp';
-const String kVerifyOtpEndpoint =
-    '$kBaseUrl/api/auth/forgot-password/verify-otp';
-const String kResetPasswordEndpoint =
-    '$kBaseUrl/api/auth/forgot-password/reset-password';
+// Forgot Password
+String get kSendOtpEndpoint => ApiConstants.forgotPasswordSendOtp;
+String get kVerifyOtpEndpoint => ApiConstants.forgotPasswordReset;
+String get kResetPasswordEndpoint => ApiConstants.forgotPasswordReset;
 
 // Driver Endpoints
-const String kDriverRegisterEndpoint = '$kBaseUrl/driver/register';
-const String kDriverLoginEndpoint = '$kBaseUrl/driver/login';
-const String kVehicleRegisterEndpoint = '$kBaseUrl/vehicle/register';
-const String kSavePreferredRoutesEndpoint =
-    '$kBaseUrl/driver/preferred-routes'; 
-const String kSaveAvailabilityEndpoint = '$kBaseUrl/driver/availability';
-const String kReportIssueEndpoint = '$kBaseUrl/driver/report-issue';
+String get kDriverRegisterEndpoint => ApiConstants.driverRegister;
+String get kDriverLoginEndpoint => ApiConstants.driverLogin;
+String get kVehicleRegisterEndpoint => ApiConstants.vehicleRegister;
+String get kSavePreferredRoutesEndpoint => ApiConstants.driverPreferredRoutes;
+String get kSaveAvailabilityEndpoint => ApiConstants.driverAvailability;
+String get kDispatchBaseUrl => kBaseUrl;
+String get kReportIssueEndpoint => '$kBaseUrl/driver/report-issue';

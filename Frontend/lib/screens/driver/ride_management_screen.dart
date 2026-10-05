@@ -855,6 +855,48 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         debugPrint("Fetch primary assigned rides error: $e");
       }
 
+      // 1b. Fetch Scheduled Rides
+      try {
+        final uri = Uri.parse('$kBaseUrl/api/schedule-rides');
+        final response = await http
+            .get(uri)
+            .timeout(const Duration(seconds: 12));
+        if (response.statusCode == 200) {
+          final body = jsonDecode(response.body);
+          combinedRawList.addAll(parseRidesPayload(body));
+        }
+      } catch (e) {
+        debugPrint("Fetch scheduled rides error: $e");
+      }
+
+      // 1c. Fetch Driver Hire Requests
+      try {
+        final uri = Uri.parse('$kBaseUrl/api/driver-hire');
+        final response = await http
+            .get(uri)
+            .timeout(const Duration(seconds: 12));
+        if (response.statusCode == 200) {
+          final body = jsonDecode(response.body);
+          combinedRawList.addAll(parseRidesPayload(body));
+        }
+      } catch (e) {
+        debugPrint("Fetch driver hire rides error: $e");
+      }
+
+      // 1d. Fetch Travel & Tourism Requests
+      try {
+        final uri = Uri.parse('$kBaseUrl/api/travel-requests');
+        final response = await http
+            .get(uri)
+            .timeout(const Duration(seconds: 12));
+        if (response.statusCode == 200) {
+          final body = jsonDecode(response.body);
+          combinedRawList.addAll(parseRidesPayload(body));
+        }
+      } catch (e) {
+        debugPrint("Fetch travel requests error: $e");
+      }
+
       // 2. Specific Driver GET /api/rides/driver/{driverId}
       if (combinedRawList.isEmpty) {
         try {
@@ -1330,15 +1372,24 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         'driverId': currentDriverId,
       });
 
-      // 1. Primary endpoint on dispatch server: PUT /api/requests/:id
+      // 1. Determine the correct endpoint based on prefix
+      String baseEndpoint = '/api/requests/$rideId';
+      if (rideId.startsWith('SCH-')) {
+        baseEndpoint = '/api/schedule-rides/$rideId';
+      } else if (rideId.startsWith('TT-')) {
+        baseEndpoint = '/api/travel-requests/$rideId';
+      } else if (rideId.startsWith('HDR-')) {
+        baseEndpoint = '/api/driver-hire/$rideId';
+      }
+
       http.Response response = await http.put(
-        Uri.parse('$kDispatchBaseUrl/api/requests/$rideId'),
+        Uri.parse('$kDispatchBaseUrl$baseEndpoint'),
         headers: headers,
         body: bodyData,
       );
 
       // 2. If 404, try dispatch PUT /api/rides/status/:id
-      if (response.statusCode == 404) {
+      if (response.statusCode == 404 && !rideId.startsWith('SCH-')) {
         response = await http.put(
           Uri.parse('$kDispatchBaseUrl/api/rides/status/$rideId'),
           headers: headers,
@@ -2614,11 +2665,21 @@ class RideInfo {
             : null) ??
         '';
 
+    final reqIdForType = json['requestId']?.toString() ?? json['id']?.toString() ?? '';
+    String derivedType = 'Monthly Pick & Drop';
+    if (reqIdForType.startsWith('HDR-')) {
+      derivedType = 'Hire Driver';
+    } else if (reqIdForType.startsWith('TT-')) {
+      derivedType = 'Travel & Tourism';
+    } else if (reqIdForType.startsWith('SCH-')) {
+      derivedType = 'Schedule Ride';
+    }
+
     final schedType =
         (json['scheduleType'] ??
                 (json['customSchedule'] != null
                     ? 'Custom Schedule'
-                    : (json['rideType'] ?? 'Monthly Pick & Drop')))
+                    : (json['rideType'] ?? derivedType)))
             .toString();
 
     final pTime =

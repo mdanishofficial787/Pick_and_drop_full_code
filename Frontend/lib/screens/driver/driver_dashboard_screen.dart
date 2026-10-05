@@ -3,11 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '/theme/app_theme.dart';
 import 'preferred_routes_screen.dart';
+import 'route_match_setup_screen.dart';
 import 'manage_availability_screen.dart';
 import 'ride_management_screen.dart';
 import 'report_issue_screen.dart';
 import 'profile_settings_screen.dart';
-import 'route_match_setup_screen.dart';
+
 
 class DriverDashboardScreen extends StatelessWidget {
   final String driverName;
@@ -168,7 +169,6 @@ class DriverDashboardScreen extends StatelessWidget {
                     constraints: const BoxConstraints(maxWidth: 440),
                     child: Column(
                       children: [
-                        // Card 1: Preferred Routes
                         _buildMenuCard(
                           context: context,
                           icon: Icons.calendar_month_outlined,
@@ -179,6 +179,22 @@ class DriverDashboardScreen extends StatelessWidget {
                               MaterialPageRoute(
                                 builder: (_) =>
                                     PreferredRoutesScreen(driverId: driverId),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        
+                        // Card 1.5: Route Match Setup
+                        _buildMenuCard(
+                          context: context,
+                          icon: Icons.alt_route_rounded,
+                          title: 'Route Match Setup',
+                          subtitle: 'View and select suggested routes.',
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const RouteMatchSetupScreen(),
                               ),
                             );
                           },
@@ -391,10 +407,9 @@ class DriverDashboardScreen extends StatelessWidget {
                           title: 'Route Matching',
                           subtitle: 'See suggested Route Requests.',
                           onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const RouteMatchSetupScreen(),
-                              ),
+                            // Route Match Setup Screen is missing, placeholder for now
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text("Route Matching is under construction")),
                             );
                           },
                         ),

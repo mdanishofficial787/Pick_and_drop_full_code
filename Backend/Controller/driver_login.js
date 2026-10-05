@@ -25,50 +25,27 @@ const loginDriver = async (req, res) => {
         const cleanCountryCode = CountryCode.trim();
         let cleanPhoneNumber = PhoneNumber.toString().trim();
 
-        // Extract raw digits
-        const rawDigits = cleanPhoneNumber.replace(/\D/g, '');
-        // National digits (without 92 if included, and without leading 0)
-        let nationalDigits = rawDigits;
-        if (nationalDigits.startsWith('92')) {
-            nationalDigits = nationalDigits.slice(2);
-        }
-        if (nationalDigits.startsWith('0')) {
-            nationalDigits = nationalDigits.replace(/^0+/, '');
+        if (cleanPhoneNumber.startsWith(cleanCountryCode)) {
+            cleanPhoneNumber = cleanPhoneNumber
+                .slice(cleanCountryCode.length)
+                .trim();
         }
 
-        console.log(`[Driver Login Attempt] Raw: "${PhoneNumber}", National digits: "${nationalDigits}"`);
-
-        // Find driver using multi-field flexible matching:
-        // 1. Exact phone match
-        // 2. Phone ending with national digits
-        // 3. Regex matching digits anywhere
-        // 4. Exact raw digits
-        const possiblePhones = [
-            cleanPhoneNumber,
-            nationalDigits,
-            `0${nationalDigits}`,
-            `+92${nationalDigits}`,
-            `+92 ${nationalDigits}`,
-            `92${nationalDigits}`
-        ];
+        if (cleanPhoneNumber.startsWith("0")) {
+            cleanPhoneNumber = cleanPhoneNumber.substring(1);
+        }
 
         const driver = await Driver.findOne({
-            $or: [
-                { PhoneNumber: { $in: possiblePhones } },
-                { PhoneNumber: new RegExp(nationalDigits + '$') },
-                { PhoneNumber: new RegExp('^\\+?92\\s*' + nationalDigits + '$') }
-            ]
-        }).lean();
+            CountryCode: cleanCountryCode,
+            PhoneNumber: cleanPhoneNumber,
+        });
 
         if (!driver) {
-            console.log(`[Driver Login FAIL] Driver NOT found for input: "${PhoneNumber}" (searched variants: ${possiblePhones.join(', ')})`);
             return res.status(401).json({
                 success: false,
                 message: "Invalid phone number or password",
             });
         }
-
-        console.log(`[Driver Login FOUND] Driver: "${driver.Name}", Phone: "${driver.PhoneNumber}", Verification: "${driver.verificationStatus}"`);
 
         const isPasswordValid = await bcrypt.compare(
             Password,
@@ -76,14 +53,11 @@ const loginDriver = async (req, res) => {
         );
 
         if (!isPasswordValid) {
-            console.log(`[Driver Login FAIL] Password mismatch for driver "${driver.Name}"`);
             return res.status(401).json({
                 success: false,
                 message: "Invalid phone number or password",
             });
         }
-
-        console.log(`[Driver Login SUCCESS] Driver "${driver.Name}" logged in successfully!`);
 
         if (
             driver.verificationStatus !== "Approved" &&
@@ -108,17 +82,7 @@ const loginDriver = async (req, res) => {
             }
         );
 
-        // Sanitize: if availability is not an object (corrupted data), reset it
-        if (driver.availability && typeof driver.availability !== 'object') {
-            driver.availability = null;
-            // Also fix in the database so it doesn't crash again
-            await Driver.updateOne(
-                { _id: driver._id },
-                { $unset: { availability: "" } }
-            );
-        }
-
-        const driverResponse = { ...driver };
+        const driverResponse = driver.toObject();
         delete driverResponse.Password;
 
         return res.status(200).json({
