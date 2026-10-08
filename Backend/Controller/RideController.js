@@ -109,7 +109,7 @@ exports.createMonthlyRide = async (req, res) => {
             seating: savedRide.seatingArrangement || "Sedan Executive",
             selection: savedRide.vehicleTypeSelection || "Separate",
             ac: savedRide.acPreference || "AC",
-            label: `${savedRide.vehicleType || "Sedan"} • ${savedRide.acPreference || "AC"}`
+            label: `${savedRide.vehicleType || "Sedan"} â€¢ ${savedRide.acPreference || "AC"}`
           },
           vehicleType: savedRide.vehicleType || "Sedan",
           acPreference: savedRide.acPreference || "AC",
@@ -126,7 +126,7 @@ exports.createMonthlyRide = async (req, res) => {
 
         io.emit("new-ride", ridePayload);
         io.emit("ride-update", { type: "NEW_RIDE", ride: ridePayload });
-        console.log("📡 Real-time event emitted: new-ride", savedRide.requestId);
+        console.log("ðŸ“¡ Real-time event emitted: new-ride", savedRide.requestId);
       }
     } catch (socketErr) {
       console.warn("Socket emit notice:", socketErr.message);
@@ -180,7 +180,7 @@ exports.getAllRides = async (req, res) => {
       ];
     }
 
-    const rides = await RideRequest.find(query).sort({ createdAt: -1 });
+    const rides = await RideRequest.find(query).sort({ createdAt: -1 }).lean();
 
     const pendingCount = await RideRequest.countDocuments({ status: "Pending Dispatch" });
     const assignedCount = await RideRequest.countDocuments({ status: "ASSIGNED" });
@@ -222,7 +222,7 @@ exports.getAllRides = async (req, res) => {
         seating: ride.seatingArrangement || "Sedan Executive",
         selection: ride.vehicleTypeSelection || "Separate",
         ac: ride.acPreference || "AC",
-        label: `${ride.vehicleType || "Sedan"} • ${ride.acPreference || "AC"}`
+        label: `${ride.vehicleType || "Sedan"} â€¢ ${ride.acPreference || "AC"}`
       },
       vehicleType: ride.vehicleType || "Sedan",
       acPreference: ride.acPreference || "AC",
@@ -239,8 +239,10 @@ exports.getAllRides = async (req, res) => {
       statusLabel: ride.status,
       isPending: ride.status === 'Pending Dispatch',
       isAssigned: ride.status === 'ASSIGNED',
-      assignedDriver: ride.assignedDriverName || null,
-      assignedDriverName: ride.assignedDriverName || null,
+      assignedDriver: ride.assignedDriverName || ride.assignedDriver || null,
+      assignedDriverName: ride.assignedDriverName || ride.assignedDriver || null,
+      assignedDriverId: ride.assignedDriverId || ride.driverId || ride.driver || null,
+      driverId: ride.driverId || ride.assignedDriverId || ride.driver || null,
       createdAt: ride.createdAt
     }));
 
@@ -350,7 +352,7 @@ exports.dispatchRide = async (req, res) => {
       if (io) {
         io.emit("ride-dispatched", updatedRide);
         io.emit("ride-update", { type: "RIDE_DISPATCHED", ride: updatedRide });
-        console.log("📡 Real-time event emitted: ride-dispatched", updatedRide.requestId);
+        console.log("ðŸ“¡ Real-time event emitted: ride-dispatched", updatedRide.requestId);
       }
     } catch (socketErr) {
       console.warn("Socket emit notice:", socketErr.message);
@@ -381,7 +383,7 @@ exports.getCustomerRides = async (req, res) => {
     if (phone) query.passengerPhone = phone;
     if (email) query.passengerEmail = email.toLowerCase();
 
-    const rides = await RideRequest.find(query).sort({ createdAt: -1 });
+    const rides = await RideRequest.find(query).sort({ createdAt: -1 }).lean();
 
     return res.status(200).json({
       success: true,
@@ -468,13 +470,14 @@ exports.updateRide = async (req, res) => {
       driverCode: dDetails.driverCode || "DRV-1001",
       name: updatedRide.assignedDriverName || dDetails.name || "Driver",
       phone: dDetails.phone || "",
-      rating: dDetails.rating ? `⭐ ${dDetails.rating} (Verified Driver)` : "⭐ 4.9 (Verified Driver)",
-      vehicle: dDetails.vehicle ? `🚗 ${dDetails.vehicle}` : "🚗 Vehicle",
-      numberPlate: dDetails.registrationNumber ? `🔢 ${dDetails.registrationNumber}` : "🔢 Registered"
+      rating: dDetails.rating ? `â­ ${dDetails.rating} (Verified Driver)` : "â­ 4.9 (Verified Driver)",
+      vehicle: dDetails.vehicle ? `ðŸš— ${dDetails.vehicle}` : "ðŸš— Vehicle",
+      numberPlate: dDetails.registrationNumber ? `ðŸ”¢ ${dDetails.registrationNumber}` : "ðŸ”¢ Registered"
     };
 
     const notifyPayload = {
       requestId: updatedRide.requestId,
+      customerId: updatedRide.customerId,
       customerName: updatedRide.passengerName,
       passengerName: updatedRide.passengerName,
       passengerPhone: updatedRide.passengerPhone,
@@ -495,7 +498,7 @@ exports.updateRide = async (req, res) => {
         if (updatedRide.status === "ACCEPTED") {
           io.emit("ride_accepted", notifyPayload);
           io.emit("ride-accepted", notifyPayload);
-          console.log(`📡 Real-time event [ride_accepted] emitted for ${updatedRide.requestId} by driver ${driverDetails.name}`);
+          console.log(`ðŸ“¡ Real-time event [ride_accepted] emitted for ${updatedRide.requestId} by driver ${driverDetails.name}`);
         }
         io.emit("ride-updated", notifyPayload);
       }
@@ -591,7 +594,7 @@ exports.reportDriverUnavailable = async (req, res) => {
         io.to(`ride_${ride._id}`).emit("driver-unavailable", notifyPayload);
         io.to(`ride_${ride.requestId}`).emit("driver-unavailable", notifyPayload);
         io.emit("driver-unavailable", notifyPayload);
-        console.log(`📡 Emitted [driver-unavailable] for Ride ${ride.requestId}`);
+        console.log(`ðŸ“¡ Emitted [driver-unavailable] for Ride ${ride.requestId}`);
       }
     } catch (socketErr) {
       console.warn("Socket emit error:", socketErr.message);
@@ -666,7 +669,7 @@ exports.requestReplacementDriver = async (req, res) => {
       if (io) {
         io.emit("replacement-requested", adminPayload);
         io.emit("ride-update", { type: "REPLACEMENT_REQUESTED", ride: adminPayload });
-        console.log(`📡 Emitted [replacement-requested] for Ride ${ride.requestId}`);
+        console.log(`ðŸ“¡ Emitted [replacement-requested] for Ride ${ride.requestId}`);
       }
     } catch (socketErr) {
       console.warn("Socket emit error:", socketErr.message);
@@ -736,7 +739,7 @@ exports.getCustomerNotifications = async (req, res) => {
       // Fare / Price Update
       if (r.fare || r.status === "Pending Dispatch" || r.status === "Fare Accepted" || r.status === "Fare Rejected") {
         generatedNotifs.push({
-          title: "💰 Ride Price Updated!",
+          title: "ðŸ’° Ride Price Updated!",
           subtitle: `Admin has set your ride price to ${fareText}.`,
           rideId: rId,
           requestId: rId,
@@ -858,7 +861,7 @@ exports.respondToFare = async (req, res) => {
       status: newStatus,
       fare: ride.fare,
       fareFormatted: fareFormatted,
-      title: isAccepted ? "✅ Fare Approved by Customer" : "❌ Fare Rejected by Customer",
+      title: isAccepted ? "âœ… Fare Approved by Customer" : "âŒ Fare Rejected by Customer",
       message: isAccepted
         ? `Customer ${name} has ACCEPTED the updated ride price (${fareFormatted}). Ready for driver assignment.`
         : `Customer ${name} has REJECTED the updated ride price (${fareFormatted}).`,
@@ -873,7 +876,7 @@ exports.respondToFare = async (req, res) => {
         io.emit("admin-notification", adminNotification);
         io.emit("new-admin-notification", adminNotification);
         io.emit("ride-update", { type: "FARE_RESPONSE", ride: adminNotification });
-        console.log(`📡 Real-time event [customer-fare-response] emitted to Admin Console for Ride ${ride.requestId}: ${adminNotification.action}`);
+        console.log(`ðŸ“¡ Real-time event [customer-fare-response] emitted to Admin Console for Ride ${ride.requestId}: ${adminNotification.action}`);
       }
     } catch (socketErr) {
       console.warn("Socket emit notice:", socketErr.message);

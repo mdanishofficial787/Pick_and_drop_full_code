@@ -1,8 +1,8 @@
-// One-time script to create the first admin account.
+﻿// One-time script to create the first admin account.
 // Run from the Backend folder:  node init/seedAdmin.js
 //
 // Change the Name / Email / Password below before running,
-// then delete or keep this file safely — it is NOT a public route.
+// then delete or keep this file safely â€” it is NOT a public route.
 
 require("dotenv").config();
 const mongoose = require("mongoose");

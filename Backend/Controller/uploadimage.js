@@ -1,4 +1,4 @@
-const User = require("../schema/user");
+﻿const User = require("../schema/user");
 const mongoose = require("mongoose");
 const {
   uploadToCloudinary,
@@ -7,7 +7,7 @@ const {
 
 /**
  * Resolve the customer ID from either:
- *  - The authenticated JWT token (req.user) — supports multiple payload shapes
+ *  - The authenticated JWT token (req.user) â€” supports multiple payload shapes
  *    (id, customerId, _id, userId)
  *  - The URL parameter (req.params.id)
  * Returns null if no valid ID is found.

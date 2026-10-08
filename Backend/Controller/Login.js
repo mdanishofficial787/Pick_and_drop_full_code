@@ -1,4 +1,4 @@
-const Customer = require("../schema/user");
+﻿const Customer = require("../schema/user");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
@@ -41,13 +41,15 @@ module.exports.login = async (req, res) => {
             });
         }
 
-        // 4. Check verification
+        // 4. Check verification (Bypassed for development)
+        /*
         if (!customer.isVerified) {
             return res.status(403).json({
                 success: false,
                 message: "Please verify your account before logging in"
             });
         }
+        */
 
         // 5. Check password exists
         if (!customer.Password) {

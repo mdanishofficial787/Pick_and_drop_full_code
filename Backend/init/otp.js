@@ -1,4 +1,4 @@
-const otpdata = [
+﻿const otpdata = [
 
   {
     customerId: "66a123456789abcdef123456",

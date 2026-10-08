@@ -1,4 +1,4 @@
-const TermCondition = require("../schema/termCondition");
+﻿const TermCondition = require("../schema/termCondition");
 
 module.exports.getTermsConditions = async (req, res) => {
     try {

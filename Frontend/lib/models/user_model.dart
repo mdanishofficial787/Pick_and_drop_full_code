@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:ride_and_serve/constants/api_constants.dart';
 
 class CustomerUser {
   final String id;
@@ -32,6 +33,10 @@ class CustomerUser {
       photo = json['photo'];
     } else if (json['CustomerPhoto'] is String) {
       photo = json['CustomerPhoto'];
+    }
+
+    if (photo != null && photo.isNotEmpty && !photo.startsWith('http')) {
+      photo = '${ApiConstants.baseUrl}/${photo.replaceFirst(RegExp(r'^/+'), '')}';
     }
 
     return CustomerUser(

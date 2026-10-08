@@ -1,4 +1,4 @@
-const nodemailer = require("nodemailer");
+﻿const nodemailer = require("nodemailer");
 
 const transporter = nodemailer.createTransport({
     service: "gmail",
@@ -12,10 +12,10 @@ const transporter = nodemailer.createTransport({
 
 transporter.verify((error, success) => {
     if (error) {
-        console.error("❌ Gmail SMTP connection failed:");
+        console.error("âŒ Gmail SMTP connection failed:");
         console.error(error);
     } else {
-        console.log("✅ Gmail SMTP is ready");
+        console.log("âœ… Gmail SMTP is ready");
     }
 });
 

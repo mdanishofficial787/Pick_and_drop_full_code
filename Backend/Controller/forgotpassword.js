@@ -1,4 +1,4 @@
-const Customer = require("../schema/user");
+﻿const Customer = require("../schema/user");
 const OTP = require("../schema/otp");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");

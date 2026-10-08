@@ -1,4 +1,4 @@
-const DriverHireRequest = require("../schema/DriverHireRequest");
+﻿const DriverHireRequest = require("../schema/DriverHireRequest");
 const Driver = require("../schema/Driver");
 
 // 1. Create a new Hire Driver Request (Customer Mobile App)
@@ -70,7 +70,7 @@ exports.createDriverHireRequest = async (req, res) => {
         io.emit("driver-hire-update", { type: "NEW_DRIVER_HIRE", request: hirePayload });
         io.emit("new-ride", { ...hirePayload, category: "Hire Driver" });
         io.emit("ride-update", { type: "NEW_DRIVER_HIRE", ride: hirePayload });
-        console.log("📡 Real-time event emitted: new-driver-hire", savedHire.requestId);
+        console.log("ðŸ“¡ Real-time event emitted: new-driver-hire", savedHire.requestId);
       }
     } catch (socketErr) {
       console.warn("Socket emit notice:", socketErr.message);
@@ -113,7 +113,7 @@ exports.getAllDriverHireRequests = async (req, res) => {
       ];
     }
 
-    const requests = await DriverHireRequest.find(query).sort({ createdAt: -1 });
+    const requests = await DriverHireRequest.find(query).sort({ createdAt: -1 }).lean();
 
     const formattedRequests = requests.map((item) => ({
       _id: item._id,
@@ -132,7 +132,10 @@ exports.getAllDriverHireRequests = async (req, res) => {
       fare: item.fare || 3500,
       fareFormatted: `Rs. ${(item.fare || 3500).toLocaleString()}`,
       status: item.status,
-      assignedDriverName: item.assignedDriverName || null,
+      assignedDriver: item.assignedDriverName || item.assignedDriver || null,
+      assignedDriverName: item.assignedDriverName || item.assignedDriver || null,
+      assignedDriverId: item.assignedDriverId || item.driverId || item.driver || null,
+      driverId: item.driverId || item.assignedDriverId || item.driver || null,
       createdAt: item.createdAt
     }));
 

@@ -3,7 +3,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'edit_profile_screen.dart';
 import '../welcome_screen.dart';
 
-class ProfileSettingsScreen extends StatelessWidget {
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../../api_config.dart';
+
+class ProfileSettingsScreen extends StatefulWidget {
   final String driverName;
   final String? profilePic;
   final String? driverId;
@@ -18,6 +22,42 @@ class ProfileSettingsScreen extends StatelessWidget {
     this.token,
     this.onLogout,
   });
+
+  @override
+  State<ProfileSettingsScreen> createState() => _ProfileSettingsScreenState();
+}
+
+class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
+  String? currentProfilePic;
+  String currentDriverName = "";
+
+  @override
+  void initState() {
+    super.initState();
+    currentProfilePic = widget.profilePic;
+    currentDriverName = widget.driverName;
+    _fetchProfile();
+  }
+
+  Future<void> _fetchProfile() async {
+    if (widget.driverId == null) return;
+    try {
+      final res = await http.get(
+        Uri.parse('$kBaseUrl/driver/${widget.driverId}'),
+        headers: widget.token != null ? {'Authorization': 'Bearer ${widget.token}'} : {},
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final d = data['driver'] ?? data['data'] ?? data;
+        if (mounted) {
+          setState(() {
+            currentDriverName = d['fullName']?.toString() ?? d['name']?.toString() ?? currentDriverName;
+            currentProfilePic = d['profilePic']?.toString() ?? d['profilePicture']?.toString() ?? currentProfilePic;
+          });
+        }
+      }
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -78,7 +118,7 @@ class ProfileSettingsScreen extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Text(
-              driverName,
+              currentDriverName,
               style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w800, color: const Color(0xFF111827)),
             ),
             const SizedBox(height: 8),
@@ -104,7 +144,7 @@ class ProfileSettingsScreen extends StatelessWidget {
               child: Column(
                 children: [
                   _buildMenuItem(context, icon: Icons.person_outline_rounded, iconBgColor: const Color(0xFFEFF6FF), iconColor: const Color(0xFF1959F6), title: 'Edit Profile', onTap: () {
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => EditProfileScreen(driverName: driverName, profilePic: profilePic, driverId: driverId, token: token)));
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => EditProfileScreen(driverName: currentDriverName, profilePic: currentProfilePic, driverId: widget.driverId, token: widget.token)));
                   }, showDivider: true),
                   _buildMenuItem(context, icon: Icons.access_time_rounded, iconBgColor: const Color(0xFFEFF6FF), iconColor: const Color(0xFF1959F6), title: 'Ride History', onTap: () {}, showDivider: true),
                   _buildMenuItem(context, icon: Icons.logout_rounded, iconBgColor: const Color(0xFFFEE2E2), iconColor: const Color(0xFFDC2626), title: 'Log Out', onTap: () => _confirmLogout(context), showDivider: false),
@@ -118,8 +158,8 @@ class ProfileSettingsScreen extends StatelessWidget {
   }
 
   Widget _buildProfileImage() {
-    if (profilePic != null && profilePic!.isNotEmpty) {
-      return Image.network(profilePic!, fit: BoxFit.cover, width: 100, height: 100, errorBuilder: (_, __, ___) => _defaultAvatar());
+    if (currentProfilePic != null && currentProfilePic!.isNotEmpty) {
+      return Image.network(currentProfilePic!, fit: BoxFit.cover, width: 100, height: 100, errorBuilder: (_, __, ___) => _defaultAvatar());
     }
     return _defaultAvatar();
   }
@@ -161,8 +201,8 @@ class ProfileSettingsScreen extends StatelessWidget {
           ElevatedButton(
             onPressed: () { 
               Navigator.pop(ctx); 
-              if (onLogout != null) {
-                onLogout!();
+              if (widget.onLogout != null) {
+                widget.onLogout!();
               } else {
                 Navigator.of(context).pushAndRemoveUntil(
                   MaterialPageRoute(builder: (_) => const AccountTypeScreen()),

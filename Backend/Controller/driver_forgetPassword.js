@@ -1,4 +1,4 @@
-const Driver = require("../schema/Driver");
+﻿const Driver = require("../schema/Driver");
 const PasswordResetRequest = require("../schema/PasswordResetRequest");
 
 const sendForgotPasswordOTP = async (req, res) => {

@@ -10,6 +10,7 @@ import 'package:ride_and_serve/screens/customer/monthly_pickup_screen.dart';
 import 'package:ride_and_serve/screens/customer/driver_unavailable_screen.dart';
 import 'package:ride_and_serve/screens/customer/profile_view_screen.dart';
 import 'package:ride_and_serve/screens/customer/schedule_pickup_screen.dart';
+import 'package:ride_and_serve/screens/customer/payment_details_screen.dart';
 import 'package:ride_and_serve/services/auth_service.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
@@ -214,8 +215,32 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
 
       if (matchesUser || (customerId.isEmpty && passengerPhone.isEmpty && currentUserPhone.isEmpty)) {
         final rawFare = rideObj['fareFormatted'] ?? (rideObj['fare'] != null ? 'Rs. ${formatNumberCustom(rideObj['fare'])}' : null);
+        final String status = (rideObj['status'] ?? '').toString();
 
-        if (rawFare != null) {
+        if (status == 'COMPLETED' || status == 'Completed') {
+          final String statusKey = '${payloadId}_COMPLETED';
+          if (!_seenRideStatusIds.contains(statusKey)) {
+            _seenRideStatusIds.add(statusKey);
+            final notifObj = {
+              'id': payloadId,
+              'title': '✅ Ride Completed!',
+              'subtitle': 'Please submit your payment for this ride.',
+              'time': 'Just Now',
+              'status': 'COMPLETED',
+              'requestId': payloadId,
+              'rideId': payloadId,
+              'fareFormatted': rawFare?.toString() ?? 'Rs. 4500',
+              'pickup': rideObj['pickupLocation'] ?? 'Pickup Point',
+              'destination': rideObj['dropoffLocation'] ?? 'Destination Point',
+              'isRead': false,
+            };
+            setState(() {
+              _notifications.insert(0, notifObj);
+              _unreadCount++;
+            });
+            _showRideCompletedBanner(notifObj);
+          }
+        } else if (rawFare != null) {
           final String fareText = rawFare.toString();
           final String statusKey = '${payloadId}_FARE_UPDATED_$fareText';
 
@@ -332,6 +357,19 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
               'rating': driverDetails['rating']?.toString() ?? '⭐ 4.9 (Verified Driver)',
               'vehicle': driverDetails['vehicle'] ?? '🚗 Vehicle',
               'numberPlate': driverDetails['registrationNumber'] ?? driverDetails['numberPlate'] ?? '🔢 Registered',
+              'pickup': ride['pickupLocation'] ?? 'Pickup Point',
+              'destination': ride['dropoffLocation'] ?? 'Destination Point',
+            });
+          } else if (status == 'COMPLETED' || status == 'Completed') {
+            fetchedNotifs.add({
+              'id': rideId,
+              'title': '✅ Ride Completed!',
+              'subtitle': 'Please submit your payment for this ride.',
+              'time': 'Just Now',
+              'status': 'COMPLETED',
+              'requestId': rideId,
+              'rideId': rideId,
+              'fareFormatted': fareText,
               'pickup': ride['pickupLocation'] ?? 'Pickup Point',
               'destination': ride['dropoffLocation'] ?? 'Destination Point',
             });
@@ -512,6 +550,64 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   }
 
 
+  // Ride Completed Top Banner pop-up
+  void _showRideCompletedBanner(Map<String, dynamic> notif) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        elevation: 8,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(top: 40, left: 16, right: 16),
+        backgroundColor: const Color(0xFF1959F6),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        duration: const Duration(seconds: 8),
+        content: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check_circle_rounded, color: Color(0xFF1959F6), size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    notif['title'] ?? 'Ride Completed!',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    notif['subtitle'] ?? 'Please submit your payment.',
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                    maxLines: 2,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        action: SnackBarAction(
+          label: 'PAY',
+          textColor: Colors.white,
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => PaymentDetailsScreen(rideData: notif),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   // Open Full Driver Details Dialog
   void _showDriverAcceptedDialog(Map<String, dynamic> notif) {
     showDialog(
@@ -563,11 +659,18 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                     children: [
                       Row(
                         children: [
-                          CircleAvatar(
-                            radius: 28,
-                            backgroundColor: _primaryBlue.withValues(alpha: 0.1),
-                            child: const Icon(Icons.person_rounded, color: _primaryBlue, size: 32),
-                          ),
+                          if (_currentUser?.photoUrl != null && _currentUser!.photoUrl!.isNotEmpty)
+                            CircleAvatar(
+                              radius: 28,
+                              backgroundColor: Colors.transparent,
+                              backgroundImage: NetworkImage(_currentUser!.photoUrl!),
+                            )
+                          else
+                            CircleAvatar(
+                              radius: 28,
+                              backgroundColor: _primaryBlue.withValues(alpha: 0.1),
+                              child: const Icon(Icons.person_rounded, color: _primaryBlue, size: 32),
+                            ),
                           const SizedBox(width: 14),
                           Expanded(
                             child: Column(
@@ -681,7 +784,13 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                     ),
                     icon: const Icon(Icons.check_circle_outline, color: Colors.white),
                     label: const Text('OKAY, GOT IT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: () {
+                      Navigator.pop(context);
+                      setState(() {
+                        _notifications.removeWhere((n) => n['id'] == notif['id'] || n['requestId'] == notif['requestId']);
+                        if (_unreadCount > 0) _unreadCount--;
+                      });
+                    },
                   ),
                 ),
               ],
@@ -1056,6 +1165,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                         final notif = _notifications[index];
                         final isDriverUnavail = (notif['isDriverUnavailable'] == true || notif['status'] == 'Driver Unavailable');
                         final isPriceUpdate = (notif['status'] == 'PRICE_UPDATED');
+                        final isCompleted = (notif['status'] == 'COMPLETED' || notif['status'] == 'Completed');
 
                         return Card(
                           elevation: 2,
@@ -1069,7 +1179,9 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                     ? const Color(0xFFFEE2E2)
                                     : isPriceUpdate
                                         ? const Color(0xFFFEF3C7)
-                                        : const Color(0xFFDCFCE7),
+                                        : isCompleted
+                                            ? const Color(0xFFDBEAFE) // Light blue
+                                            : const Color(0xFFDCFCE7),
                                 shape: BoxShape.circle,
                               ),
                               child: Icon(
@@ -1077,12 +1189,16 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                     ? Icons.priority_high_rounded
                                     : isPriceUpdate
                                         ? Icons.attach_money_rounded
-                                        : Icons.directions_car_filled_rounded,
+                                        : isCompleted
+                                            ? Icons.check_circle_rounded
+                                            : Icons.directions_car_filled_rounded,
                                 color: isDriverUnavail
                                     ? const Color(0xFFDC2626)
                                     : isPriceUpdate
                                         ? const Color(0xFFD97706)
-                                        : const Color(0xFF16A34A),
+                                        : isCompleted
+                                            ? const Color(0xFF1959F6) // primaryBlue
+                                            : const Color(0xFF16A34A),
                                 size: 24,
                               ),
                             ),
@@ -1095,7 +1211,9 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                     ? const Color(0xFFDC2626)
                                     : isPriceUpdate
                                         ? const Color(0xFFD97706)
-                                        : const Color(0xFF0F172A),
+                                        : isCompleted
+                                            ? const Color(0xFF1959F6)
+                                            : const Color(0xFF0F172A),
                               ),
                             ),
                             subtitle: Column(
@@ -1109,7 +1227,9 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                       ? 'Tap to request replacement driver'
                                       : isPriceUpdate
                                           ? 'Updated Fare: ${notif['fareFormatted'] ?? ''}'
-                                          : 'Tap to view driver details',
+                                          : isCompleted
+                                              ? 'Tap to submit payment'
+                                              : 'Tap to view driver details',
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
@@ -1124,6 +1244,9 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                             ),
                             trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
                             onTap: () {
+                              setState(() {
+                                _notifications.removeAt(index);
+                              });
                               Navigator.pop(context);
                               if (isDriverUnavail) {
                                 Navigator.push(
@@ -1134,6 +1257,13 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                 );
                               } else if (isPriceUpdate) {
                                 _showFareApprovalDialog(notif);
+                              } else if (isCompleted) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => PaymentDetailsScreen(rideData: notif),
+                                  ),
+                                );
                               } else {
                                 _showDriverAcceptedDialog(notif);
                               }

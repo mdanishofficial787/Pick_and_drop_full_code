@@ -1,4 +1,4 @@
-require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
+﻿require("dotenv").config({ path: require("path").join(__dirname, "..", ".env") });
 const mongoose = require("mongoose");
 const { userdata } = require("./data.js");
 const Customer = require("../schema/user");

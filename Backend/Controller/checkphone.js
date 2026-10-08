@@ -1,4 +1,4 @@
-const Customer = require("../schema/user");
+﻿const Customer = require("../schema/user");
 
 module.exports.checkPhone = async (req, res) => {
     try {

@@ -94,7 +94,7 @@ exports.createTravelRequest = async (req, res) => {
         io.emit("travel-request-update", { type: "NEW_TRAVEL_REQUEST", request: payload });
         io.emit("new-ride", { ...payload, category: "Travel & Tourism" });
         io.emit("ride-update", { type: "NEW_TRAVEL_REQUEST", ride: payload });
-        console.log("📡 Real-time event emitted: new-travel-request", saved.requestId);
+        console.log("ðŸ“¡ Real-time event emitted: new-travel-request", saved.requestId);
       }
     } catch (socketErr) {
       console.warn("Socket emit notice:", socketErr.message);
@@ -138,7 +138,7 @@ exports.getAllTravelRequests = async (req, res) => {
       ];
     }
 
-    const requests = await TravelTourismRequest.find(query).sort({ createdAt: -1 });
+    const requests = await TravelTourismRequest.find(query).sort({ createdAt: -1 }).lean();
     const pendingCount = await TravelTourismRequest.countDocuments({ status: "Pending Dispatch" });
     const assignedCount = await TravelTourismRequest.countDocuments({ status: "ASSIGNED" });
 
@@ -167,7 +167,10 @@ exports.getAllTravelRequests = async (req, res) => {
       fareFormatted: `Rs. ${(r.fare || 15000).toLocaleString()}`,
       notes: r.notes,
       status: r.status,
-      assignedDriverName: r.assignedDriverName || null,
+      assignedDriver: r.assignedDriverName || r.assignedDriver || null,
+      assignedDriverName: r.assignedDriverName || r.assignedDriver || null,
+      assignedDriverId: r.assignedDriverId || r.driverId || r.driver || null,
+      driverId: r.driverId || r.assignedDriverId || r.driver || null,
       createdAt: r.createdAt
     }));
 
@@ -194,7 +197,7 @@ exports.getCustomerTravelRequests = async (req, res) => {
     if (phone) query.passengerPhone = phone;
     if (email) query.passengerEmail = email.toLowerCase();
 
-    const requests = await TravelTourismRequest.find(query).sort({ createdAt: -1 });
+    const requests = await TravelTourismRequest.find(query).sort({ createdAt: -1 }).lean();
     return res.status(200).json({ success: true, count: requests.length, requests });
   } catch (err) {
     return res.status(500).json({ success: false, message: "Failed to fetch customer travel requests", error: err.message });
@@ -241,7 +244,7 @@ exports.dispatchTravelRequest = async (req, res) => {
       if (io) {
         io.emit("travel-request-dispatched", updated);
         io.emit("travel-request-update", { type: "TRAVEL_REQUEST_DISPATCHED", request: updated });
-        console.log("📡 Real-time event emitted: travel-request-dispatched", updated.requestId);
+        console.log("ðŸ“¡ Real-time event emitted: travel-request-dispatched", updated.requestId);
       }
     } catch (socketErr) {}
 
@@ -279,6 +282,7 @@ exports.updateTravelRequest = async (req, res) => {
 
     const notifyPayload = {
       requestId: request.requestId,
+      customerId: request.customerId,
       requestType: "Travel & Tourism",
       passengerName: request.passengerName,
       passengerPhone: request.passengerPhone,
@@ -292,7 +296,7 @@ exports.updateTravelRequest = async (req, res) => {
       if (io) {
         io.emit("travel-request-updated", notifyPayload);
         io.emit("ride-updated", { ...notifyPayload, id: request.requestId });
-        console.log(`📡 Emitted [travel-request-updated] for ${request.requestId}`);
+        console.log(`ðŸ“¡ Emitted [travel-request-updated] for ${request.requestId}`);
       }
     } catch (socketErr) {}
 

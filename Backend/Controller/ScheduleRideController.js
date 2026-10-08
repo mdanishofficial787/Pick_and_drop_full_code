@@ -87,7 +87,7 @@ exports.createScheduleRide = async (req, res) => {
         io.emit("schedule-ride-update", { type: "NEW_SCHEDULE_RIDE", ride: payload });
         io.emit("new-ride", { ...payload, category: "Schedule Ride" });
         io.emit("ride-update", { type: "NEW_SCHEDULE_RIDE", ride: payload });
-        console.log("📡 Real-time event emitted: new-schedule-ride", saved.requestId);
+        console.log("ðŸ“¡ Real-time event emitted: new-schedule-ride", saved.requestId);
       }
     } catch (socketErr) {
       console.warn("Socket emit notice:", socketErr.message);
@@ -129,7 +129,7 @@ exports.getAllScheduleRides = async (req, res) => {
       ];
     }
 
-    const rides = await ScheduleRide.find(query).sort({ createdAt: -1 });
+    const rides = await ScheduleRide.find(query).sort({ createdAt: -1 }).lean();
     const pendingCount = await ScheduleRide.countDocuments({ status: "Pending Dispatch" });
     const assignedCount = await ScheduleRide.countDocuments({ status: "ASSIGNED" });
 
@@ -156,7 +156,10 @@ exports.getAllScheduleRides = async (req, res) => {
       notes: r.notes,
       customSchedule: r.customSchedule,
       status: r.status,
-      assignedDriverName: r.assignedDriverName || null,
+      assignedDriver: r.assignedDriverName || r.assignedDriver || null,
+      assignedDriverName: r.assignedDriverName || r.assignedDriver || null,
+      assignedDriverId: r.assignedDriverId || r.driverId || r.driver || null,
+      driverId: r.driverId || r.assignedDriverId || r.driver || null,
       createdAt: r.createdAt
     }));
 
@@ -184,7 +187,7 @@ exports.getCustomerScheduleRides = async (req, res) => {
     if (phone) query.passengerPhone = phone;
     if (email) query.passengerEmail = email.toLowerCase();
 
-    const rides = await ScheduleRide.find(query).sort({ createdAt: -1 });
+    const rides = await ScheduleRide.find(query).sort({ createdAt: -1 }).lean();
     return res.status(200).json({ success: true, count: rides.length, rides });
   } catch (err) {
     return res.status(500).json({ success: false, message: "Failed to fetch customer schedule rides", error: err.message });
@@ -231,7 +234,7 @@ exports.dispatchScheduleRide = async (req, res) => {
       if (io) {
         io.emit("schedule-ride-dispatched", updated);
         io.emit("schedule-ride-update", { type: "SCHEDULE_RIDE_DISPATCHED", ride: updated });
-        console.log("📡 Real-time event emitted: schedule-ride-dispatched", updated.requestId);
+        console.log("ðŸ“¡ Real-time event emitted: schedule-ride-dispatched", updated.requestId);
       }
     } catch (socketErr) {}
 
@@ -308,13 +311,14 @@ exports.updateScheduleRide = async (req, res) => {
       driverCode: dDetails.driverCode || "DRV-1001",
       name: ride.assignedDriverName || dDetails.name || "Driver",
       phone: dDetails.phone || "",
-      rating: dDetails.rating ? `⭐ ${dDetails.rating} (Verified Driver)` : "⭐ 4.9 (Verified Driver)",
-      vehicle: dDetails.vehicle ? `🚗 ${dDetails.vehicle}` : "🚗 Vehicle",
-      numberPlate: dDetails.registrationNumber ? `🔢 ${dDetails.registrationNumber}` : "🔢 Registered"
+      rating: dDetails.rating ? `â­ ${dDetails.rating} (Verified Driver)` : "â­ 4.9 (Verified Driver)",
+      vehicle: dDetails.vehicle ? `ðŸš— ${dDetails.vehicle}` : "ðŸš— Vehicle",
+      numberPlate: dDetails.registrationNumber ? `ðŸ”¢ ${dDetails.registrationNumber}` : "ðŸ”¢ Registered"
     };
 
     const notifyPayload = {
       requestId: ride.requestId,
+      customerId: ride.customerId,
       requestType: "Schedule Ride",
       customerName: ride.passengerName,
       passengerName: ride.passengerName,
@@ -335,12 +339,12 @@ exports.updateScheduleRide = async (req, res) => {
         if (ride.status === "ACCEPTED") {
           io.emit("ride_accepted", notifyPayload);
           io.emit("ride-accepted", notifyPayload);
-          console.log(`📡 Real-time event [ride_accepted] emitted for ${ride.requestId} by driver ${driverDetails.name}`);
+          console.log(`ðŸ“¡ Real-time event [ride_accepted] emitted for ${ride.requestId} by driver ${driverDetails.name}`);
         }
         io.emit("schedule-ride-updated", notifyPayload);
         // Also emit ride-updated so customer app can catch fare update
         io.emit("ride-updated", { ...notifyPayload, id: ride.requestId });
-        console.log(`📡 Emitted [schedule-ride-updated] for ${ride.requestId}`);
+        console.log(`ðŸ“¡ Emitted [schedule-ride-updated] for ${ride.requestId}`);
       }
     } catch (socketErr) {}
 

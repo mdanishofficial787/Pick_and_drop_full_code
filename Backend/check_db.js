@@ -1,4 +1,4 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 const mongoose = require("mongoose");
 const DBurl = process.env.MONGO_URL || "mongodb://127.0.0.1:27017/ride_and_serve";
 

@@ -1,4 +1,4 @@
-const VehicleValidation = require("../Validation/vehiclevalidation");
+﻿const VehicleValidation = require("../Validation/vehiclevalidation");
 
 const validateVehicle = (req, res, next) => {
   const { error, value } = VehicleValidation.validate(req.body, {

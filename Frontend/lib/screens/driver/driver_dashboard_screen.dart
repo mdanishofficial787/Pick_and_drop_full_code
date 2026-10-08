@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import 'package:google_fonts/google_fonts.dart';
 import '/theme/app_theme.dart';
@@ -9,8 +9,11 @@ import 'ride_management_screen.dart';
 import 'report_issue_screen.dart';
 import 'profile_settings_screen.dart';
 
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../../api_config.dart';
 
-class DriverDashboardScreen extends StatelessWidget {
+class DriverDashboardScreen extends StatefulWidget {
   final String driverName;
   final String? driverId;
   final String? profilePic;
@@ -23,6 +26,42 @@ class DriverDashboardScreen extends StatelessWidget {
     this.profilePic,
     this.token,
   });
+
+  @override
+  State<DriverDashboardScreen> createState() => _DriverDashboardScreenState();
+}
+
+class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
+  String? currentProfilePic;
+  String currentDriverName = "";
+
+  @override
+  void initState() {
+    super.initState();
+    currentProfilePic = widget.profilePic;
+    currentDriverName = widget.driverName;
+    _fetchProfile();
+  }
+
+  Future<void> _fetchProfile() async {
+    if (widget.driverId == null) return;
+    try {
+      final res = await http.get(
+        Uri.parse('$kBaseUrl/driver/${widget.driverId}'),
+        headers: widget.token != null ? {'Authorization': 'Bearer ${widget.token}'} : {},
+      );
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final d = data['driver'] ?? data['data'] ?? data;
+        if (mounted) {
+          setState(() {
+            currentDriverName = d['fullName']?.toString() ?? d['name']?.toString() ?? currentDriverName;
+            currentProfilePic = d['profilePic']?.toString() ?? d['profilePicture']?.toString() ?? currentProfilePic;
+          });
+        }
+      }
+    } catch (_) {}
+  }
 
   void _showActionFeedback(BuildContext context, String title) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -87,7 +126,7 @@ class DriverDashboardScreen extends StatelessWidget {
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (profilePic != null && profilePic!.isNotEmpty)
+                      if (currentProfilePic != null && currentProfilePic!.isNotEmpty)
                         Container(
                           margin: const EdgeInsets.only(bottom: 12, top: 4),
                           decoration: BoxDecoration(
@@ -104,7 +143,7 @@ class DriverDashboardScreen extends StatelessWidget {
                           child: CircleAvatar(
                             radius: 36,
                             backgroundColor: Colors.white24,
-                            backgroundImage: NetworkImage(profilePic!),
+                            backgroundImage: NetworkImage(currentProfilePic!),
                           ),
                         )
                       else
@@ -132,7 +171,7 @@ class DriverDashboardScreen extends StatelessWidget {
                           ),
                         ),
                       Text(
-                        'WELCOME, ${driverName.toUpperCase()}!',
+                        'WELCOME, ${currentDriverName.toUpperCase()}!',
                         style: GoogleFonts.inter(
                           fontSize: 20,
                           fontWeight: FontWeight.w800,
@@ -178,7 +217,7 @@ class DriverDashboardScreen extends StatelessWidget {
                             Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) =>
-                                    PreferredRoutesScreen(driverId: driverId),
+                                    PreferredRoutesScreen(driverId: widget.driverId),
                               ),
                             );
                           },
@@ -211,7 +250,7 @@ class DriverDashboardScreen extends StatelessWidget {
                             Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) => ManageAvailabilityScreen(
-                                  driverId: driverId,
+                                  driverId: widget.driverId,
                                 ),
                               ),
                             );
@@ -282,8 +321,8 @@ class DriverDashboardScreen extends StatelessWidget {
                                             MaterialPageRoute(
                                               builder: (_) =>
                                                   RideManagementScreen(
-                                                    driverId: driverId,
-                                                    driverName: driverName,
+                                                    driverId: widget.driverId,
+                                                    driverName: currentDriverName,
                                                     filterPrefix: 'REQ-',
                                                     moduleName:
                                                         'Monthly Pick & Drop',
@@ -309,8 +348,8 @@ class DriverDashboardScreen extends StatelessWidget {
                                             MaterialPageRoute(
                                               builder: (_) =>
                                                   RideManagementScreen(
-                                                    driverId: driverId,
-                                                    driverName: driverName,
+                                                    driverId: widget.driverId,
+                                                    driverName: currentDriverName,
                                                     filterPrefix: 'SCH-',
                                                     moduleName:
                                                         'Scheduled Rides',
@@ -336,8 +375,8 @@ class DriverDashboardScreen extends StatelessWidget {
                                             MaterialPageRoute(
                                               builder: (_) =>
                                                   RideManagementScreen(
-                                                    driverId: driverId,
-                                                    driverName: driverName,
+                                                    driverId: widget.driverId,
+                                                    driverName: currentDriverName,
                                                     filterPrefix: 'HDR-',
                                                     moduleName: 'Hire Driver',
                                                   ),
@@ -362,8 +401,8 @@ class DriverDashboardScreen extends StatelessWidget {
                                             MaterialPageRoute(
                                               builder: (_) =>
                                                   RideManagementScreen(
-                                                    driverId: driverId,
-                                                    driverName: driverName,
+                                                    driverId: widget.driverId,
+                                                    driverName: currentDriverName,
                                                     filterPrefix: 'TT-',
                                                     moduleName:
                                                         'Travel & Tourism',
@@ -391,8 +430,8 @@ class DriverDashboardScreen extends StatelessWidget {
                             Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) => ReportIssueScreen(
-                                  driverId: driverId,
-                                  driverName: driverName,
+                                  driverId: widget.driverId,
+                                  driverName: currentDriverName,
                                 ),
                               ),
                             );
@@ -425,10 +464,10 @@ class DriverDashboardScreen extends StatelessWidget {
                             Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) => ProfileSettingsScreen(
-                                  driverName: driverName,
-                                  profilePic: profilePic,
-                                  driverId: driverId,
-                                  token: token,
+                                  driverName: currentDriverName,
+                                  profilePic: currentProfilePic,
+                                  driverId: widget.driverId,
+                                  token: widget.token,
                                 ),
                               ),
                             );

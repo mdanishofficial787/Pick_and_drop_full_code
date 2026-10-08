@@ -1,4 +1,4 @@
-const transporter = require("../config/email");
+﻿const transporter = require("../config/email");
 
 const sendEmail = async ({
     to,
