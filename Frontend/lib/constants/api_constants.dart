@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 
 class ApiConstants {
   // Your PC's Local Network IP (allows physical mobile connected via USB / Wi-Fi to reach Backend)
-  static const String serverIp = '192.168.88.90';
+  static const String serverIp = '192.168.88.81';
   static const String serverPort = '3000';
 
   // Optional manual override if needed
@@ -43,7 +43,7 @@ class ApiConstants {
   // Driver Endpoints
   static String get driverRegister => '$baseUrl/driver/register';
   static String get driverLogin => '$baseUrl/driver/login';
-  static String get vehicleRegister => '$baseUrl/driver/register-vehicle';
+  static String get vehicleRegister => '$baseUrl/vehicle/register';
   static String get driverPreferredRoutes => '$baseUrl/driver/preferred-routes';
   static String get driverAvailability => '$baseUrl/driver/availability';
 
@@ -65,4 +65,8 @@ class ApiConstants {
   static String get createTravelRequest => '$baseUrl/api/travel-requests';
   static String get getAllTravelRequests => '$baseUrl/api/travel-requests';
   static String get getCustomerTravelRequests => '$baseUrl/api/travel-requests/customer';
+
+  // Payments
+  static String get customerPaymentHistory => '$baseUrl/api/payments/history';
+  static String get submitPayment => '$baseUrl/api/payments/upload';
 }

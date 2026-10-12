@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:ride_and_serve/models/user_model.dart';
 import 'package:ride_and_serve/screens/customer/edit_profile_screen.dart';
+import 'package:ride_and_serve/screens/customer/customer_payment_history_screen.dart';
 import 'package:ride_and_serve/screens/customer/login_page.dart';
 import 'package:ride_and_serve/services/auth_service.dart';
 
@@ -169,8 +170,11 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
                       iconColor: const Color(0xFF2563EB),
                       title: 'Ride History',
                       onTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Opening Ride History...'), duration: Duration(seconds: 1)),
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (ctx) => CustomerPaymentHistoryScreen(user: _currentUser),
+                          ),
                         );
                       },
                     ),

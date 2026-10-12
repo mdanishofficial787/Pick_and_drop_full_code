@@ -193,6 +193,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
 
       final List<_PassengerItem> items = [];
       final Set<String> seen = {};
+      final Set<String> seenNames = {};
 
       int seatCounter = 1;
       for (final r in combinedList) {
@@ -222,7 +223,13 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
             continue; // Skip ghost / empty customer
           }
 
+          final phone = (map['customerPhone'] ?? map['passengerPhone'] ?? map['phone'] ?? '').toString();
+          final uniqueKey = '${name.toLowerCase().trim()}_${phone.trim()}';
+
+          if (seenNames.contains(uniqueKey)) continue;
+
           seen.add(id);
+          seenNames.add(uniqueKey);
 
           if (widget.rideId != null && widget.rideId!.isNotEmpty) {
             final rId = (map['rideId'] ?? map['id'] ?? map['_id'] ?? '').toString();
@@ -245,7 +252,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
               name: name,
               initials: _PassengerItem.computeInitials(name),
               seat: 'Seat $seatCounter',
-              phone: (map['customerPhone'] ?? map['passengerPhone'] ?? map['phone'] ?? '').toString(),
+              phone: phone,
               pickup: (map['pickupLocation'] is Map ? map['pickupLocation']['address'] : map['pickupLocation']?.toString()) ?? '',
               drop: (map['dropLocation'] is Map ? map['dropLocation']['address'] : map['dropLocation']?.toString()) ?? '',
               isSelected: widget.requestId != null ? isPreselected : true,

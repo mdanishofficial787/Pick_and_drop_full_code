@@ -1,7 +1,7 @@
-﻿const express = require("express");
+const express = require("express");
 const router = express.Router();
 
-const verifyOTPController = require("../Controller/verifyOTP");
+const verifyOTPController = require("../Controller/verifyotp");
 const resendOTPController = require("../Controller/resendOtp");
 
 const {

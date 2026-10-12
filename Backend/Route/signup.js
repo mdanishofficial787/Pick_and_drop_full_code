@@ -1,8 +1,8 @@
-﻿const express = require("express");
+const express = require("express");
 const router = express.Router();
 
-const signupController = require("../Controller/Signup");
-const checkSession = require("../Controller/checkSession");
+const signupController = require("../Controller/SignUp");
+const checkSession = require("../Controller/checksession");
 const checkPhoneController = require("../Controller/checkphone");
 const passport = require("passport");
 const authMiddleware = require("../Middleware/Authr");

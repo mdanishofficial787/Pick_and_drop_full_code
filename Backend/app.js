@@ -1,4 +1,4 @@
-﻿require("dotenv").config();
+require("dotenv").config();
 const dns = require("dns");
 try {
   dns.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
@@ -44,14 +44,14 @@ app.set("io", io);
 
 // Socket.IO connection handler
 io.on("connection", (socket) => {
-  console.log("ðŸ”Œ Socket connected via WebSocket:", socket.id);
+  console.log("🔌 Socket connected via WebSocket:", socket.id);
 
   socket.on("join-customer", (customerId) => {
     if (customerId) {
       const roomStr = String(customerId);
       socket.join(`customer_${roomStr}`);
       socket.join(roomStr);
-      console.log(`ðŸ‘¤ Customer joined socket room: customer_${roomStr}`);
+      console.log(`👤 Customer joined socket room: customer_${roomStr}`);
     }
   });
 
@@ -60,12 +60,12 @@ io.on("connection", (socket) => {
       const rideStr = String(rideId);
       socket.join(`ride_${rideStr}`);
       socket.join(rideStr);
-      console.log(`ðŸš— Joined ride socket room: ride_${rideStr}`);
+      console.log(`🚗 Joined ride socket room: ride_${rideStr}`);
     }
   });
 
   socket.on("disconnect", () => {
-    console.log("âŒ Socket disconnected:", socket.id);
+    console.log("❌ Socket disconnected:", socket.id);
   });
 });
 
@@ -80,14 +80,14 @@ const LocalDBurl = process.env.LOCAL_MONGO_URL || "mongodb://127.0.0.1:27017/rid
 async function connectDB() {
   try {
     await mongoose.connect(DBurl);
-    console.log("âœ… MongoDB Atlas connected successfully!");
+    console.log("✅ MongoDB Atlas connected successfully!");
   } catch (err) {
-    console.warn("âš ï¸ MongoDB Atlas connection error. Falling back to Local MongoDB:", err.message);
+    console.warn("⚠️ MongoDB Atlas connection error. Falling back to Local MongoDB:", err.message);
     try {
       await mongoose.connect(LocalDBurl);
-      console.log("âœ… Local MongoDB connected successfully!");
+      console.log("✅ Local MongoDB connected successfully!");
     } catch (localErr) {
-      console.error("âŒ Fatal MongoDB connection error:", localErr.message);
+      console.error("❌ Fatal MongoDB connection error:", localErr.message);
     }
   }
 }
@@ -103,11 +103,11 @@ async function fixStaleIndexes() {
     const badIndex = indexes.find(idx => idx.name === "notificationId_1");
     if (badIndex) {
       await collection.dropIndex("notificationId_1");
-      console.log("ðŸ”§ Fixed: Dropped stale index 'notificationId_1' from customernotifications");
+      console.log("🔧 Fixed: Dropped stale index 'notificationId_1' from customernotifications");
     }
   } catch (err) {
     // Non-fatal - log but don't crash
-    console.warn("âš ï¸ Index fix notice:", err.message);
+    console.warn("⚠️ Index fix notice:", err.message);
   }
 }
 
@@ -175,10 +175,31 @@ app.use("/admin/driver-selection", rideRoutes);
 app.use("/admin", driverAdminRoutes);
 app.use("/api/payments", paymentRoute);
 
-//app.use("/api/referral", referralRoutes);
+// Catch-all 404 handler
+app.use((req, res, next) => {
+  res.status(404).json({
+    success: false,
+    message: `Cannot ${req.method} ${req.originalUrl} - Endpoint not found`
+  });
+});
+
+// Global Error Handler to always return JSON (fixes HTML FormatExceptions in Flutter)
+app.use((err, req, res, next) => {
+  console.error("Global Error Handler:", err);
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({
+    success: false,
+    message: err.message || "An unexpected error occurred",
+    error: process.env.NODE_ENV === 'development' ? err.toString() : undefined
+  });
+});
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`ðŸš€ Backend Server running on http://0.0.0.0:${PORT} (REST + WebSocket)`);
-  console.log(`ðŸ”Œ Socket.IO ready for real-time Admin Portal updates`);
-});
+if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`🚀 Backend Server running on http://0.0.0.0:${PORT} (REST + WebSocket)`);
+    console.log(`🔌 Socket.IO ready for real-time Admin Portal updates`);
+  });
+}
+
+module.exports = app;

@@ -11,6 +11,7 @@ import 'package:ride_and_serve/screens/customer/driver_unavailable_screen.dart';
 import 'package:ride_and_serve/screens/customer/profile_view_screen.dart';
 import 'package:ride_and_serve/screens/customer/schedule_pickup_screen.dart';
 import 'package:ride_and_serve/screens/customer/payment_details_screen.dart';
+import 'package:ride_and_serve/screens/customer/customer_payment_history_screen.dart';
 import 'package:ride_and_serve/services/auth_service.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
@@ -33,6 +34,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   List<Map<String, dynamic>> _notifications = [];
   int _unreadCount = 0;
   final Set<String> _seenRideStatusIds = {};
+  final Set<String> _dismissedNotifIds = {};
   bool _isFirstFetch = true;
 
   static const Color _primaryBlue = AppColors.primaryBlue; // Color(0xFF0066FF) / AppColors.primaryBlue
@@ -93,6 +95,18 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
             _socket?.emit('join-customer', _currentUser!.phoneNumber);
           }
         }
+      });
+
+      _socket?.on('payment-status-updated', (data) {
+        if (!mounted) return;
+        final Map<String, dynamic> payload = Map<String, dynamic>.from(data is Map ? data : {});
+        final String title = payload['title'] ?? 'Payment Updated';
+        final String message = payload['message'] ?? 'Your payment status has been updated.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$title\n$message'),
+          backgroundColor: const Color(0xFF1959F6),
+          duration: const Duration(seconds: 5),
+        ));
       });
 
       _socket?.on('driver-unavailable', (data) {
@@ -422,7 +436,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
         }
 
         setState(() {
-          _notifications = uniqueNotifs;
+          _notifications = uniqueNotifs.where((n) => !_dismissedNotifIds.contains(n['id']?.toString() ?? '')).toList();
           if (!isInitialLoad && newlyArrivedCount > 0) {
             _unreadCount += newlyArrivedCount;
           } else if (isInitialLoad) {
@@ -663,7 +677,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                             CircleAvatar(
                               radius: 28,
                               backgroundColor: Colors.transparent,
-                              backgroundImage: NetworkImage(_currentUser!.photoUrl!),
+                              backgroundImage: NetworkImage(_currentUser!.photoUrl!.startsWith('http') ? _currentUser!.photoUrl! : '${ApiConstants.baseUrl}/${_currentUser!.photoUrl!.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '')}'),
                             )
                           else
                             CircleAvatar(
@@ -1167,9 +1181,27 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                         final isPriceUpdate = (notif['status'] == 'PRICE_UPDATED');
                         final isCompleted = (notif['status'] == 'COMPLETED' || notif['status'] == 'Completed');
 
-                        return Card(
-                          elevation: 2,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.grey.shade200)),
+                        return Dismissible(
+                          key: Key(notif['id']?.toString() ?? 'notif_$index'),
+                          direction: DismissDirection.endToStart,
+                          onDismissed: (direction) {
+                            setState(() {
+                              _dismissedNotifIds.add(notif['id']?.toString() ?? 'notif_$index');
+                              _notifications.removeAt(index);
+                            });
+                          },
+                          background: Container(
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.only(right: 20),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEF4444), // red-500
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: const Icon(Icons.delete_outline_rounded, color: Colors.white),
+                          ),
+                          child: Card(
+                            elevation: 2,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.grey.shade200)),
                           child: ListTile(
                             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                             leading: Container(
@@ -1269,6 +1301,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                               }
                             },
                           ),
+                        ),
                         );
                       },
                     ),
@@ -1290,47 +1323,12 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     _loadUserData();
   }
 
-  // Payment Details Dialog
+  // Payment Details Navigation
   void _showPaymentDetailsDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: const BoxDecoration(color: Color(0xFFEBF3FF), shape: BoxShape.circle),
-                child: const Icon(Icons.account_balance_wallet_rounded, color: _primaryBlue, size: 36),
-              ),
-              const SizedBox(height: 14),
-              const Text('PAYMENT DETAILS', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-              const SizedBox(height: 6),
-              const Text('Cash on pickup & online wallet payments supported.', textAlign: TextAlign.center, style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B))),
-              const SizedBox(height: 16),
-              const Divider(),
-              const SizedBox(height: 10),
-              _DetailRow(icon: Icons.payments_rounded, label: 'Default Method', value: 'Cash / Bank Transfer'),
-              const SizedBox(height: 8),
-              _DetailRow(icon: Icons.check_circle_outline, label: 'Billing Status', value: 'Up to Date'),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _primaryBlue,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('OKAY', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                ),
-              ),
-            ],
-          ),
-        ),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CustomerPaymentHistoryScreen(user: _currentUser),
       ),
     );
   }
@@ -1397,7 +1395,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                             child: ClipOval(
                               child: (_currentUser?.photoUrl != null && _currentUser!.photoUrl!.isNotEmpty)
                                   ? Image.network(
-                                      _currentUser!.photoUrl!,
+                                      _currentUser!.photoUrl!.startsWith('http') ? _currentUser!.photoUrl! : '${ApiConstants.baseUrl}/${_currentUser!.photoUrl!.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '')}',
                                       fit: BoxFit.cover,
                                       errorBuilder: (c, e, s) => const Icon(Icons.person, color: _primaryBlue, size: 36),
                                     )

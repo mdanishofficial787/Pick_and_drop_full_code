@@ -244,34 +244,34 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen>
       return;
     }
 
-    setState(() => _isSubmitting = true);
-    try {
-      final token = await DriverApiService.registerDriver(
-        name: _nameController.text.trim(),
-        countryCode: '+92',
-        phoneNumber: _phoneController.text.trim(),
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-        cnicNumber: _cnicController.text.trim(),
-        license: _licenseNumberController.text.trim(),
-        licenseExpiryDate: _licenseExpiryDate!.toIso8601String(),
-        driverPhoto: _avatarFile!,
-        cnicFront: _uploadedDocFiles['CNIC FRONT']!,
-        cnicBack: _uploadedDocFiles['CNIC BACK']!,
-        licenseFront: _uploadedDocFiles['LICENSE FRONT']!,
-        licenseBack: _uploadedDocFiles['LICENSE BACK']!,
-      );
-
-      if (!mounted) return;
-      widget.onContinue(token);
-    } on ApiException catch (e) {
-      _showSnackbar(e.message);
-    } catch (e) {
-      debugPrint('REGISTRATION ERROR: $e');
-      _showSnackbar('Something went wrong. Please try again.');
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
-    }
+      setState(() => _isSubmitting = true);
+      try {
+        final token = await DriverApiService.registerDriver(
+          name: _nameController.text.trim(),
+          countryCode: '+92',
+          phoneNumber: _phoneController.text.trim(),
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+          cnicNumber: _cnicController.text.trim(),
+          license: _licenseNumberController.text.trim(),
+          licenseExpiryDate: _licenseExpiryDate!.toIso8601String(),
+          driverPhoto: _avatarFile!,
+          cnicFront: _uploadedDocFiles['CNIC FRONT']!,
+          cnicBack: _uploadedDocFiles['CNIC BACK']!,
+          licenseFront: _uploadedDocFiles['LICENSE FRONT']!,
+          licenseBack: _uploadedDocFiles['LICENSE BACK']!,
+        );
+  
+        if (!mounted) return;
+        widget.onContinue(token);
+      } on ApiException catch (e) {
+        _showSnackbar(e.message);
+      } catch (e) {
+        debugPrint('REGISTRATION ERROR: $e');
+        _showSnackbar('Server Error: $e');
+      } finally {
+        if (mounted) setState(() => _isSubmitting = false);
+      }
   }
 
   void _showSnackbar(String message) {

@@ -168,6 +168,7 @@ class _ReportAssignedCustomersScreenState
 
       final List<_AssignedCustomerRide> parsedList = [];
       final Set<String> seenIds = {};
+      final Set<String> seenNames = {};
 
       for (final item in combinedRawList) {
         if (item is Map) {
@@ -178,9 +179,13 @@ class _ReportAssignedCustomersScreenState
                 (ride.drop.isEmpty || ride.drop == 'N/A') &&
                 (ride.name == 'Customer' || ride.name.isEmpty) &&
                 ride.phone.isEmpty;
+            
+            final uniqueKey = '${ride.name.toLowerCase().trim()}_${ride.phone.trim()}';
+
             final key = ride.requestId.isNotEmpty ? ride.requestId : ride.id;
-            if (!isGhost && key.isNotEmpty && !seenIds.contains(key)) {
+            if (!isGhost && key.isNotEmpty && !seenIds.contains(key) && !seenNames.contains(uniqueKey)) {
               seenIds.add(key);
+              seenNames.add(uniqueKey);
               if (ride.id.isNotEmpty) seenIds.add(ride.id);
               if (ride.requestId.isNotEmpty) seenIds.add(ride.requestId);
               parsedList.add(ride);

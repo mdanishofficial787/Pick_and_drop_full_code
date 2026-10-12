@@ -1,4 +1,4 @@
-﻿const Customer = require("../schema/user");
+const Customer = require("../schema/user");
 const OTP = require("../schema/otp");
 const bcrypt = require("bcrypt");
 const sendOTPEmail = require("../utils/Email");
@@ -289,7 +289,7 @@ module.exports.updateProfile = async (req, res) => {
           );
           streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
         });
-        user.CustomerPhoto = result.secure_url;
+        user.CustomerPhoto = { url: result.secure_url, public_id: result.public_id };
       } catch (uploadErr) {
         console.warn("Cloudinary upload failed, keeping old photo:", uploadErr.message);
       }

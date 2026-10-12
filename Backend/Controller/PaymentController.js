@@ -6,7 +6,8 @@ const resolveCustomerId = (req) => {
   if (req.user) {
     return req.user.id || req.user.customerId || req.user.userId || req.user._id || null;
   }
-  if (req.body.customerId) return req.body.customerId;
+  if (req.body && req.body.customerId) return req.body.customerId;
+  if (req.query && req.query.customerId) return req.query.customerId;
   return null;
 };
 
@@ -63,9 +64,22 @@ exports.submitPayment = async (req, res) => {
 exports.getCustomerPayments = async (req, res) => {
   try {
     const customerId = resolveCustomerId(req);
-    if (!customerId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    const phone = req.query?.phone;
+    
+    let query = {};
+    if (customerId) {
+      if (phone) {
+        query = { $or: [{ customerId }, { customerPhone: phone }] };
+      } else {
+        query = { customerId };
+      }
+    } else if (phone) {
+      query = { customerPhone: phone };
+    } else {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
 
-    const payments = await Payment.find({ customerId }).sort({ createdAt: -1 }).lean();
+    const payments = await Payment.find(query).sort({ createdAt: -1 }).lean();
     return res.status(200).json({ success: true, count: payments.length, data: payments });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Server Error", error: error.message });
