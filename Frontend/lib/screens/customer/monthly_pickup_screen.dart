@@ -611,19 +611,23 @@ class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
                         },
                         borderRadius: BorderRadius.circular(30),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
                           decoration: BoxDecoration(
                             color: _schedulePreset == 'Mon - Fri' ? _navyBlue : Colors.white,
                             borderRadius: BorderRadius.circular(30),
                             border: Border.all(color: _schedulePreset == 'Mon - Fri' ? _navyBlue : _borderColor),
                           ),
                           alignment: Alignment.center,
-                          child: Text(
-                            'Monday \u2013 Friday',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: _schedulePreset == 'Mon - Fri' ? Colors.white : const Color(0xFF334155),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              'Monday \u2013 Friday',
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: _schedulePreset == 'Mon - Fri' ? Colors.white : const Color(0xFF334155),
+                              ),
                             ),
                           ),
                         ),
@@ -640,19 +644,23 @@ class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
                         },
                         borderRadius: BorderRadius.circular(30),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
                           decoration: BoxDecoration(
                             color: _schedulePreset == 'Mon - Sat' ? _navyBlue : Colors.white,
                             borderRadius: BorderRadius.circular(30),
                             border: Border.all(color: _schedulePreset == 'Mon - Sat' ? _navyBlue : _borderColor),
                           ),
                           alignment: Alignment.center,
-                          child: Text(
-                            'Monday \u2013 Saturday',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: _schedulePreset == 'Mon - Sat' ? Colors.white : const Color(0xFF334155),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              'Monday \u2013 Saturday',
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: _schedulePreset == 'Mon - Sat' ? Colors.white : const Color(0xFF334155),
+                              ),
                             ),
                           ),
                         ),
