@@ -1,4 +1,4 @@
-﻿const express = require("express");
+const express = require("express");
 const router = express.Router();
 
 const driverAuth = require("../Middleware/driver_auth");
@@ -89,5 +89,12 @@ router.post(
   "/issue",
   reportIssue
 );
+
+// Suggested Routes & Acceptance & Notifications
+const { getSuggestedRoutes, acceptSuggestedRoute, getDriverNotifications, markDriverNotificationRead } = require("../Controller/RideController");
+router.get("/suggested-routes", getSuggestedRoutes);
+router.post("/accept-route", acceptSuggestedRoute);
+router.get("/notifications", getDriverNotifications);
+router.patch("/notifications/:id/read", markDriverNotificationRead);
 
 module.exports = router;

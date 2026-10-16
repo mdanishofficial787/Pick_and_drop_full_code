@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 
 import 'package:google_fonts/google_fonts.dart';
 import '/theme/app_theme.dart';
@@ -233,7 +233,10 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                           onTap: () {
                             Navigator.of(context).push(
                               MaterialPageRoute(
-                                builder: (_) => const RouteMatchSetupScreen(),
+                                builder: (_) => RouteMatchSetupScreen(
+                                  driverId: widget.driverId,
+                                  driverName: currentDriverName,
+                                ),
                               ),
                             );
                           },

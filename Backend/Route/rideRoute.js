@@ -1,4 +1,4 @@
-﻿const express = require("express");
+const express = require("express");
 const router = express.Router();
 const {
   createMonthlyRide,
@@ -10,14 +10,36 @@ const {
   reportDriverUnavailable,
   requestReplacementDriver,
   getCustomerNotifications,
-  respondToFare
+  dismissCustomerNotification,
+  clearAllCustomerNotifications,
+  respondToFare,
+  getSuggestedRoutes,
+  createSuggestedRoute,
+  acceptSuggestedRoute,
+  setPreferredRoute,
+  getDriverNotifications,
+  markDriverNotificationRead
 } = require("../Controller/RideController");
+
+// Suggested Routes & Match Setup
+router.get("/suggested-routes", getSuggestedRoutes);
+router.post("/suggested-routes", createSuggestedRoute);
+router.post("/accept-route", acceptSuggestedRoute);
+router.patch("/suggested-routes/:id/preferred", setPreferredRoute);
+
+// Driver Notifications
+router.get("/driver-notifications", getDriverNotifications);
+router.patch("/driver-notifications/:id/read", markDriverNotificationRead);
+router.post("/driver-notifications/:id/read", markDriverNotificationRead);
 
 // Customer booking
 router.post("/monthly", createMonthlyRide);
 router.post("/", createMonthlyRide);
 router.get("/customer", getCustomerRides);
 router.get("/customer-notifications", getCustomerNotifications);
+router.post("/customer-notifications/:id/dismiss", dismissCustomerNotification);
+router.delete("/customer-notifications/:id", dismissCustomerNotification);
+router.post("/customer-notifications/clear-all", clearAllCustomerNotifications);
 router.post("/respond-fare", respondToFare);
 router.post("/:id/respond-fare", respondToFare);
 

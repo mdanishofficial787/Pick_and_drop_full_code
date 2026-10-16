@@ -3,6 +3,9 @@ const RideRequest = require("../schema/RideRequest");
 const Driver = require("../schema/Driver");
 const Customer = require("../schema/user");
 const CustomerNotification = require("../schema/CustomerNotification");
+const SuggestedRoute = require("../schema/SuggestedRoute");
+const Vehicle = require("../schema/Vehicle");
+const DriverNotification = require("../schema/DriverNotification");
 
 // 1. Create a new Monthly Ride Booking (Customer Mobile App)
 exports.createMonthlyRide = async (req, res) => {
@@ -470,9 +473,9 @@ exports.updateRide = async (req, res) => {
       driverCode: dDetails.driverCode || "DRV-1001",
       name: updatedRide.assignedDriverName || dDetails.name || "Driver",
       phone: dDetails.phone || "",
-      rating: dDetails.rating ? `â­ ${dDetails.rating} (Verified Driver)` : "â­ 4.9 (Verified Driver)",
-      vehicle: dDetails.vehicle ? `ðŸš— ${dDetails.vehicle}` : "ðŸš— Vehicle",
-      numberPlate: dDetails.registrationNumber ? `ðŸ”¢ ${dDetails.registrationNumber}` : "ðŸ”¢ Registered"
+      rating: dDetails.rating ? `⭐ ${dDetails.rating} (Verified Driver)` : "⭐ 4.9 (Verified Driver)",
+      vehicle: dDetails.vehicle ? `🚗 ${dDetails.vehicle}` : "🚗 Vehicle",
+      numberPlate: dDetails.registrationNumber ? `🔢 ${dDetails.registrationNumber}` : "🔢 Registered"
     };
 
     const notifyPayload = {
@@ -702,13 +705,16 @@ exports.getCustomerNotifications = async (req, res) => {
 
     const query = queryConds.length > 0 ? { $or: queryConds } : {};
 
-    // 1. Fetch persistent notifications from CustomerNotification collection
-    const storedNotifs = await CustomerNotification.find(query).sort({ createdAt: -1 }).lean().catch(() => []);
+    // 1. Fetch persistent notifications from CustomerNotification collection (exclude dismissed)
+    const storedNotifs = await CustomerNotification.find({
+      ...query,
+      isDismissed: { $ne: true }
+    }).sort({ createdAt: -1 }).lean().catch(() => []);
 
     // 2. Also fetch active rides for customer from RideRequest collection
     const customerRides = await RideRequest.find(query).sort({ updatedAt: -1 }).lean().catch(() => []);
 
-    // 3. Generate notifications dynamically for any rides that exist
+    // 3. Generate notifications dynamically ONLY for actionable active events
     const generatedNotifs = [];
     for (const r of customerRides) {
       const rId = r.requestId || r._id.toString();
@@ -717,6 +723,8 @@ exports.getCustomerNotifications = async (req, res) => {
       // Driver Issue / Unavailable
       if (r.status === "Driver Unavailable" || r.status === "Replacement Requested" || r.driverIssue) {
         generatedNotifs.push({
+          id: `${rId}_driver_unavailable`,
+          notificationId: `${rId}_driver_unavailable`,
           title: "Driver Unavailable",
           subtitle: "Your assigned driver is unavailable for this ride.",
           rideId: rId,
@@ -736,10 +744,13 @@ exports.getCustomerNotifications = async (req, res) => {
         });
       }
 
-      // Fare / Price Update
-      if (r.fare || r.status === "Pending Dispatch" || r.status === "Fare Accepted" || r.status === "Fare Rejected") {
+      // Fare / Price Update - ONLY if status is explicitly PRICE_UPDATED or Pending Dispatch with pending fare approval.
+      // NEVER generate for rides that are already accepted, completed, or already responded!
+      if (r.status === "PRICE_UPDATED" || (r.status === "Pending Dispatch" && r.fare && r.fareResponseStatus === "Pending")) {
         generatedNotifs.push({
-          title: "ðŸ’° Ride Price Updated!",
+          id: `${rId}_price_updated`,
+          notificationId: `${rId}_price_updated`,
+          title: "💰 Ride Price Updated!",
           subtitle: `Admin has set your ride price to ${fareText}.`,
           rideId: rId,
           requestId: rId,
@@ -750,7 +761,7 @@ exports.getCustomerNotifications = async (req, res) => {
           pickup: r.pickupLocation,
           destination: r.dropoffLocation,
           status: "PRICE_UPDATED",
-          fareResponseStatus: r.status === "Fare Accepted" ? "Fare Accepted" : r.status === "Fare Rejected" ? "Fare Rejected" : "Pending",
+          fareResponseStatus: "Pending",
           createdAt: r.updatedAt || r.createdAt
         });
       }
@@ -769,11 +780,13 @@ exports.getCustomerNotifications = async (req, res) => {
 
       if (!seenKeys.has(key)) {
         seenKeys.add(key);
+        const uniqueId = n.notificationId || (n._id ? n._id.toString() : `${rId}_${st}`);
         finalNotifications.push({
-          id: rId,
+          id: uniqueId,
+          notificationId: uniqueId,
           requestId: rId,
           rideId: rId,
-          mongoId: n.mongoId || rId,
+          mongoId: n.mongoId || (n._id ? n._id.toString() : rId),
           title: n.title || "Ride Notification",
           subtitle: n.subtitle || "",
           status: st,
@@ -815,7 +828,7 @@ exports.getCustomerNotifications = async (req, res) => {
   }
 };
 
-// 10. Respond to Fare Update (Customer accepts or rejects updated price)
+// 10. Respond to Fare Update
 exports.respondToFare = async (req, res) => {
   try {
     const { rideId, action, customerName } = req.body;
@@ -900,4 +913,629 @@ exports.respondToFare = async (req, res) => {
   }
 };
 
+// 11. Helper to build default route seed data
+function getDefaultRoutesSeed(realDbRides = []) {
+  const defaultNamesA = [
+    { name: "Sarah Khan", phone: "+92 300 1122331", pickup: "I-8/4, Street 12, Islamabad", dropoff: "Blue Area, Saudi Pak Tower", time: "7:15 AM" },
+    { name: "Muhammad Ali", phone: "+92 321 2233442", pickup: "I-8/2, Main Road, Islamabad", dropoff: "F-6 Markaz, Super Market", time: "7:25 AM" },
+    { name: "Ahmed Raza", phone: "+92 333 3344553", pickup: "H-8/1, Near HEC, Islamabad", dropoff: "G-7/2, Street 8, Islamabad", time: "7:40 AM" },
+    { name: "Fatima Noor", phone: "+92 345 4455664", pickup: "I-9/1, Street 3, Islamabad", dropoff: "Blue Area, ISE Towers", time: "7:55 AM" },
+    { name: "Zainab Bibi", phone: "+92 301 5566775", pickup: "I-8/3, Street 25, Islamabad", dropoff: "F-7 Markaz, Jinnah Super", time: "8:10 AM" },
+    { name: "Hamza Tariq", phone: "+92 312 6677886", pickup: "G-8/4, Street 18, Islamabad", dropoff: "Zero Point Interchange", time: "8:25 AM" },
+    { name: "Ayesha Malik", phone: "+92 305 7788997", pickup: "I-8/1, Service Road, Islamabad", dropoff: "Blue Area, Stock Exchange", time: "8:35 AM" },
+    { name: "Bilal Ahmed", phone: "+92 322 8899008", pickup: "H-9/2, Near Metro, Islamabad", dropoff: "Pak Secretariat, Gate 3", time: "8:50 AM" },
+  ];
 
+  const defaultNamesB = [
+    { name: "Omar Farooq", phone: "+92 300 2345671", pickup: "F-10 Markaz, Islamabad", dropoff: "Blue Area, Beverly Centre", time: "1:10 PM" },
+    { name: "Sana Javed", phone: "+92 321 3456782", pickup: "F-11/2, Street 14, Islamabad", dropoff: "G-8 Markaz, Islamabad", time: "1:20 PM" },
+    { name: "Hassan Shah", phone: "+92 333 4567893", pickup: "G-10/4, Street 22, Islamabad", dropoff: "Blue Area, Ufone Tower", time: "1:30 PM" },
+    { name: "Maryam Nawaz", phone: "+92 345 5678904", pickup: "F-8/3, Park Road, Islamabad", dropoff: "F-6/1, School Road", time: "1:40 PM" },
+    { name: "Usman Ghani", phone: "+92 302 6789015", pickup: "G-11/3, Main Double Road", dropoff: "Blue Area, Kulsum Plaza", time: "1:50 PM" },
+    { name: "Khadija Bibi", phone: "+92 313 7890126", pickup: "E-11/2, MPCHS, Islamabad", dropoff: "F-7/2, Street 11, Islamabad", time: "2:00 PM" },
+    { name: "Zubair Khan", phone: "+92 306 8901237", pickup: "F-10/1, Street 30, Islamabad", dropoff: "Zero Point, Islamabad", time: "2:10 PM" },
+    { name: "Anum Tariq", phone: "+92 324 9012348", pickup: "G-9/1, Street 4, Islamabad", dropoff: "Blue Area, Green Trust Tower", time: "2:20 PM" },
+    { name: "Kamran Akmal", phone: "+92 334 0123459", pickup: "G-10/2, Near Court, Islamabad", dropoff: "Pak Secretariat, Block A", time: "2:30 PM" },
+    { name: "Hina Altaf", phone: "+92 303 1234560", pickup: "F-11/4, Street 9, Islamabad", dropoff: "Centaurus Mall, Jinnah Ave", time: "2:35 PM" },
+    { name: "Waqas Younis", phone: "+92 323 2345671", pickup: "F-10/3, Street 15, Islamabad", dropoff: "Blue Area, Islamabad", time: "2:40 PM" },
+    { name: "Mahnoor Baloch", phone: "+92 335 3456782", pickup: "G-11/1, Street 3, Islamabad", dropoff: "F-8 Markaz, Ayub Market", time: "2:45 PM" },
+    { name: "Danish Taimoor", phone: "+92 346 4567893", pickup: "F-8/2, Street 7, Islamabad", dropoff: "Blue Area, Islamabad", time: "2:50 PM" },
+    { name: "Sadia Imam", phone: "+92 307 5678904", pickup: "G-9/3, Street 19, Islamabad", dropoff: "F-6 Markaz, Islamabad", time: "2:55 PM" },
+    { name: "Babar Azam", phone: "+92 314 6789015", pickup: "F-10/4, Street 40, Islamabad", dropoff: "Blue Area, Islamabad", time: "3:00 PM" },
+  ];
+
+  const defaultNamesC = [
+    { name: "Noman Ali", phone: "+92 300 9988771", pickup: "Saddar, Cantt, Rawalpindi", dropoff: "Blue Area, Islamabad", time: "6:15 PM" },
+    { name: "Farah Naz", phone: "+92 321 8877662", pickup: "Commercial Market, Rawalpindi", dropoff: "F-7 Markaz, Islamabad", time: "6:30 PM" },
+    { name: "Tariq Jameel", phone: "+92 333 7766553", pickup: "Chandni Chowk, Murree Road", dropoff: "Zero Point, Islamabad", time: "6:50 PM" },
+    { name: "Mehwish Hayat", phone: "+92 345 6655444", pickup: "Westridge 1, Rawalpindi", dropoff: "F-6/2, Islamabad", time: "7:15 PM" },
+    { name: "Asim Azhar", phone: "+92 301 5544335", pickup: "Faizabad Interchange", dropoff: "Blue Area, Islamabad", time: "7:45 PM" },
+  ];
+
+  function mapCustomers(defaults, prefix) {
+    return defaults.map((item, idx) => {
+      // If a real DB ride is available, link its real id
+      const dbRide = realDbRides[idx % (realDbRides.length || 1)];
+      const reqId = dbRide ? (dbRide.requestId || dbRide._id?.toString()) : `${prefix}-${8030 + idx + 1}`;
+      return {
+        requestId: reqId,
+        customerId: dbRide?.customerId || `CUST-${prefix}-${idx + 1}`,
+        customerName: dbRide?.passengerName || item.name,
+        phone: dbRide?.passengerPhone || item.phone,
+        email: dbRide?.passengerEmail || `${item.name.toLowerCase().replace(/\s+/g, '')}@gmail.com`,
+        pickupLocation: dbRide?.pickupLocation || item.pickup,
+        dropoffLocation: dbRide?.dropoffLocation || item.dropoff,
+        time: dbRide?.timeToReach || item.time,
+        fare: dbRide?.fare || 9500,
+        fareFormatted: dbRide?.fare ? `Rs. ${Number(dbRide.fare).toLocaleString()}` : "Rs. 9,500",
+        vehicleType: dbRide?.vehicleType || "Sedan",
+        status: "Pending Acceptance"
+      };
+    });
+  }
+
+  return [
+    {
+      routeId: "ROUTE-A",
+      routeName: "Route A",
+      pickupPoint: "Pickup Point",
+      dropoffPoint: "Drop Point",
+      timeRange: "7:00 AM - 9:00 AM",
+      customerCount: 8,
+      customers: mapCustomers(defaultNamesA, "A"),
+      isPreferred: false,
+      status: "Pending"
+    },
+    {
+      routeId: "ROUTE-B",
+      routeName: "Route B",
+      pickupPoint: "Pickup Point",
+      dropoffPoint: "Drop Point",
+      timeRange: "1:00 PM - 3:00 PM",
+      customerCount: 15,
+      customers: mapCustomers(defaultNamesB, "B"),
+      isPreferred: true, // Default preferred in design
+      status: "Pending"
+    },
+    {
+      routeId: "ROUTE-C",
+      routeName: "Route C",
+      pickupPoint: "Pickup Point",
+      dropoffPoint: "Drop Point",
+      timeRange: "6:00 PM - 8:00 PM",
+      customerCount: 5,
+      customers: mapCustomers(defaultNamesC, "C"),
+      isPreferred: false,
+      status: "Pending"
+    }
+  ];
+}
+
+// 12. GET SUGGESTED ROUTES (For Driver App & Admin)
+exports.getSuggestedRoutes = async (req, res) => {
+  try {
+    let routes = await SuggestedRoute.find().lean();
+
+    if (!routes || routes.length === 0) {
+      // Fetch any pending rides from MongoDB to enrich the initial seed
+      const pendingRides = await RideRequest.find({ status: { $ne: "CANCELLED" } }).limit(20).lean().catch(() => []);
+      const seedData = getDefaultRoutesSeed(pendingRides);
+      routes = await SuggestedRoute.insertMany(seedData);
+    }
+
+    return res.status(200).json({
+      success: true,
+      count: routes.length,
+      routes
+    });
+  } catch (err) {
+    console.error("Get Suggested Routes Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch suggested routes",
+      error: err.message
+    });
+  }
+};
+
+// 13. CREATE / SEND NEW ROUTE (Admin Action)
+exports.createSuggestedRoute = async (req, res) => {
+  try {
+    const { routeName, pickupPoint, dropoffPoint, timeRange, customers, driverId } = req.body;
+
+    if (!routeName) {
+      return res.status(400).json({ success: false, message: "Route name is required" });
+    }
+
+    const routeId = `ROUTE-${Date.now()}`;
+    const newRoute = new SuggestedRoute({
+      routeId,
+      routeName: routeName.trim(),
+      pickupPoint: pickupPoint || "Pickup Point",
+      dropoffPoint: dropoffPoint || "Drop Point",
+      timeRange: timeRange || "8:00 AM - 10:00 AM",
+      customerCount: Array.isArray(customers) ? customers.length : 0,
+      customers: Array.isArray(customers) ? customers : [],
+      driverId: driverId || null,
+      isPreferred: false,
+      status: "Pending"
+    });
+
+    const savedRoute = await newRoute.save();
+
+    // Create persistent DriverNotification
+    try {
+      const driverNotif = new DriverNotification({
+        driverId: driverId || null,
+        title: `📍 New Route Available: ${savedRoute.routeName}`,
+        subtitle: `Admin has assigned ${savedRoute.routeName} with ${savedRoute.customerCount} passenger requests (${savedRoute.timeRange}).`,
+        routeId: savedRoute.routeId,
+        routeName: savedRoute.routeName,
+        customerCount: savedRoute.customerCount,
+        type: "NEW_ROUTE_ASSIGNED",
+        pickup: savedRoute.pickupPoint,
+        destination: savedRoute.dropoffPoint,
+        timeRange: savedRoute.timeRange,
+        isRead: false
+      });
+      await driverNotif.save();
+
+      const io = req.app.get("io");
+      if (io) {
+        io.emit("driver-notification", driverNotif);
+        if (driverId) {
+          io.to(`driver_${driverId}`).emit("driver-notification", driverNotif);
+        }
+      }
+    } catch (notifErr) {
+      console.warn("Driver notification creation error:", notifErr.message);
+    }
+
+    // Emit real-time socket event so drivers receive this route immediately
+    try {
+      const io = req.app.get("io");
+      if (io) {
+        io.emit("new-suggested-route", savedRoute);
+        io.emit("suggested-routes-updated", savedRoute);
+      }
+    } catch (_) {}
+
+    return res.status(201).json({
+      success: true,
+      message: "Route created and sent to driver successfully",
+      route: savedRoute
+    });
+  } catch (err) {
+    console.error("Create Suggested Route Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create suggested route",
+      error: err.message
+    });
+  }
+};
+
+// 14. ACCEPT ROUTE & SEND NOTIFICATIONS TO ALL REQUESTED CUSTOMERS (Driver Action)
+exports.acceptSuggestedRoute = async (req, res) => {
+  try {
+    const { routeId, driverId, driverName } = req.body;
+
+    if (!routeId) {
+      return res.status(400).json({
+        success: false,
+        message: "Route ID or routeName is required to accept route"
+      });
+    }
+
+    // 1. Locate Route
+    let route = await SuggestedRoute.findOne({
+      $or: [
+        { routeId: routeId },
+        { _id: mongoose.Types.ObjectId.isValid(routeId) ? routeId : null },
+        { routeName: new RegExp(`^${routeId}$`, "i") }
+      ]
+    });
+
+    // If route doesn't exist yet, seed and locate it
+    if (!route) {
+      const pendingRides = await RideRequest.find({ status: { $ne: "CANCELLED" } }).limit(20).lean().catch(() => []);
+      const seedData = getDefaultRoutesSeed(pendingRides);
+      await SuggestedRoute.insertMany(seedData);
+      route = await SuggestedRoute.findOne({
+        $or: [
+          { routeId: routeId },
+          { routeName: new RegExp(`^${routeId}$`, "i") }
+        ]
+      });
+    }
+
+    if (!route) {
+      return res.status(404).json({
+        success: false,
+        message: `Suggested Route '${routeId}' not found`
+      });
+    }
+
+    // 2. Resolve Driver Information
+    let resolvedName = driverName || "Arbab";
+    let resolvedPhone = "+92 300 9876543";
+    let resolvedCode = "DRV-1001";
+    let resolvedVehicle = "Honda Accord (White)";
+    let resolvedPlate = "ISB-0009";
+    let resolvedRating = "⭐ 4.9 (Verified Driver)";
+
+    if (driverId) {
+      try {
+        let driverDoc = null;
+        if (mongoose.Types.ObjectId.isValid(driverId)) {
+          driverDoc = await Driver.findById(driverId).catch(() => null);
+        }
+        if (!driverDoc) {
+          driverDoc = await Driver.findOne({ driverReferenceId: driverId }).catch(() => null);
+        }
+
+        if (driverDoc) {
+          resolvedName = driverDoc.Name || resolvedName;
+          resolvedPhone = driverDoc.PhoneNumber || resolvedPhone;
+          resolvedCode = driverDoc.driverReferenceId || resolvedCode;
+
+          const vehDoc = await Vehicle.findOne({ driver: driverDoc._id }).catch(() => null);
+          if (vehDoc) {
+            resolvedVehicle = `${vehDoc.vehicleMake || ''} ${vehDoc.vehicleModel || ''} (${vehDoc.vehicleColor || 'White'})`.trim();
+            resolvedPlate = vehDoc.registrationNumber || resolvedPlate;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Mark Route as Accepted
+    route.status = "ACCEPTED";
+    route.acceptedByDriver = resolvedName;
+    route.acceptedAt = new Date();
+    if (driverId) route.driverId = driverId;
+
+    // 4. Update Each Customer Request & Create Notification
+    const io = req.app.get("io");
+    const notifiedCustomers = [];
+
+    for (let i = 0; i < route.customers.length; i++) {
+      const cust = route.customers[i];
+      cust.status = "ACCEPTED";
+
+      const reqId = cust.requestId || `REQ-${Date.now()}-${i}`;
+      const fareFormatted = cust.fareFormatted || (cust.fare ? `Rs. ${Number(cust.fare).toLocaleString()}` : "Rs. 9,500");
+
+      // Update matching RideRequest if exists in MongoDB
+      try {
+        await RideRequest.findOneAndUpdate(
+          {
+            $or: [
+              { requestId: reqId },
+              { passengerPhone: cust.phone },
+              { _id: mongoose.Types.ObjectId.isValid(reqId) ? reqId : null }
+            ]
+          },
+          {
+            status: "ACCEPTED",
+            assignedDriverId: driverId || null,
+            assignedDriverName: resolvedName,
+            assignedDriverDetails: {
+              driverId: driverId || "",
+              driverCode: resolvedCode,
+              name: resolvedName,
+              phone: resolvedPhone,
+              rating: resolvedRating,
+              vehicle: resolvedVehicle,
+              registrationNumber: resolvedPlate
+            }
+          }
+        );
+      } catch (_) {}
+
+      // Create persistent Notification in CustomerNotification collection
+      try {
+        await CustomerNotification.create({
+          customerId: cust.customerId || cust.phone,
+          passengerPhone: cust.phone,
+          passengerEmail: cust.email || "",
+          rideId: reqId,
+          title: "🔔 Ride Accepted by Driver!",
+          subtitle: `Driver ${resolvedName} has accepted your ride request for ${route.routeName}!`,
+          status: "ACCEPTED",
+          fareFormatted: fareFormatted,
+          pickup: cust.pickupLocation || route.pickupPoint,
+          destination: cust.dropoffLocation || route.dropoffPoint,
+          driverName: resolvedName,
+          driverPhone: resolvedPhone,
+          driverCode: resolvedCode,
+          rating: resolvedRating,
+          vehicle: resolvedVehicle,
+          numberPlate: resolvedPlate,
+          isRead: false
+        });
+      } catch (notifErr) {
+        console.warn("Failed saving customer notification:", notifErr.message);
+      }
+
+      // Prepare Socket.IO payload
+      const notifyPayload = {
+        id: reqId,
+        requestId: reqId,
+        rideId: reqId,
+        customerId: cust.customerId,
+        customerName: cust.customerName,
+        passengerName: cust.customerName,
+        passengerPhone: cust.phone,
+        passengerEmail: cust.email,
+        title: "🔔 Ride Accepted by Driver!",
+        subtitle: `Driver ${resolvedName} accepted your ride request for ${route.routeName}.`,
+        fareFormatted: fareFormatted,
+        fare: cust.fare,
+        status: "ACCEPTED",
+        pickup: cust.pickupLocation || route.pickupPoint,
+        destination: cust.dropoffLocation || route.dropoffPoint,
+        driverName: resolvedName,
+        driverPhone: resolvedPhone,
+        driverCode: resolvedCode,
+        rating: resolvedRating,
+        vehicle: resolvedVehicle,
+        numberPlate: resolvedPlate,
+        driverDetails: {
+          name: resolvedName,
+          phone: resolvedPhone,
+          driverCode: resolvedCode,
+          rating: resolvedRating,
+          vehicle: resolvedVehicle,
+          registrationNumber: resolvedPlate
+        },
+        time: cust.time || route.timeRange,
+        createdAt: new Date().toISOString()
+      };
+
+      // Emit to this customer's rooms
+      if (io) {
+        try {
+          if (cust.customerId) {
+            io.to(`customer_${cust.customerId}`).emit("ride-accepted", notifyPayload);
+            io.to(String(cust.customerId)).emit("ride-accepted", notifyPayload);
+          }
+          if (cust.phone) {
+            io.to(`customer_${cust.phone}`).emit("ride-accepted", notifyPayload);
+            io.to(String(cust.phone)).emit("ride-accepted", notifyPayload);
+          }
+          if (reqId) {
+            io.to(`ride_${reqId}`).emit("ride-accepted", notifyPayload);
+          }
+          io.emit("ride-accepted", notifyPayload);
+          io.emit("ride_accepted", notifyPayload);
+        } catch (_) {}
+      }
+
+      notifiedCustomers.push({
+        name: cust.customerName,
+        phone: cust.phone,
+        requestId: reqId
+      });
+    }
+
+    await route.save();
+
+    // Create persistent DriverNotification for this driver
+    try {
+      const driverNotif = new DriverNotification({
+        driverId: driverId || resolvedCode || null,
+        driverReferenceId: resolvedCode,
+        title: `✅ Route Accepted: ${route.routeName}`,
+        subtitle: `You accepted ${route.routeName}. Notifications dispatched to all ${route.customers.length} passengers.`,
+        routeId: route.routeId,
+        routeName: route.routeName,
+        customerCount: route.customers.length,
+        type: "ROUTE_ACCEPTED",
+        pickup: route.pickupPoint,
+        destination: route.dropoffPoint,
+        timeRange: route.timeRange,
+        isRead: false
+      });
+      await driverNotif.save();
+
+      if (io) {
+        io.emit("driver-notification", driverNotif);
+        if (driverId) {
+          io.to(`driver_${driverId}`).emit("driver-notification", driverNotif);
+        }
+      }
+    } catch (driverNotifErr) {
+      console.warn("Driver accept notification error:", driverNotifErr.message);
+    }
+
+    // Global Socket.IO event notifying Admin & all connected clients
+    if (io) {
+      io.emit("route-accepted", {
+        routeId: route.routeId,
+        routeName: route.routeName,
+        driverName: resolvedName,
+        customerCount: route.customers.length,
+        acceptedAt: route.acceptedAt
+      });
+      io.emit("ride-update", {
+        type: "ROUTE_ACCEPTED",
+        routeId: route.routeId,
+        driverName: resolvedName
+      });
+      console.log(`🚀 Route ${route.routeName} accepted by ${resolvedName}. Real-time notifications dispatched to all ${route.customers.length} customers.`);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Route '${route.routeName}' successfully accepted! Notifications have been sent to all ${route.customers.length} customers.`,
+      route,
+      notifiedCount: route.customers.length,
+      notifiedCustomers
+    });
+  } catch (err) {
+    console.error("Accept Suggested Route Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to accept route",
+      error: err.message
+    });
+  }
+};
+
+// 15. SET PREFERRED ROUTE (Star Toggle)
+exports.setPreferredRoute = async (req, res) => {
+  try {
+    const routeId = req.params.id;
+    const { isPreferred } = req.body;
+
+    const route = await SuggestedRoute.findOneAndUpdate(
+      { $or: [{ routeId: routeId }, { _id: mongoose.Types.ObjectId.isValid(routeId) ? routeId : null }] },
+      { isPreferred: isPreferred !== undefined ? isPreferred : true },
+      { new: true }
+    );
+
+    if (!route) {
+      return res.status(404).json({ success: false, message: "Route not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Preferred route updated",
+      route
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update preferred route",
+      error: err.message
+    });
+  }
+};
+
+// 16. GET DRIVER NOTIFICATIONS
+exports.getDriverNotifications = async (req, res) => {
+  try {
+    const { driverId } = req.query;
+
+    let queryConds = [{ driverId: null }];
+    if (driverId) {
+      queryConds.push({ driverId: driverId });
+      queryConds.push({ driverReferenceId: driverId });
+      if (mongoose.Types.ObjectId.isValid(driverId)) {
+        queryConds.push({ driverId: new mongoose.Types.ObjectId(driverId) });
+      }
+    }
+
+    let notifications = await DriverNotification.find({ $or: queryConds })
+      .sort({ createdAt: -1 })
+      .lean()
+      .catch(() => []);
+
+    if (!notifications || notifications.length === 0) {
+      const seedNotifs = [
+        {
+          driverId: driverId || null,
+          title: "📍 New Route Match Ready!",
+          subtitle: "Admin has published Route B with 15 customer ride requests (1:00 PM - 3:00 PM).",
+          routeId: "ROUTE-B",
+          routeName: "Route B",
+          customerCount: 15,
+          type: "NEW_ROUTE_ASSIGNED",
+          pickup: "Pickup Point (F-10 / F-11 / G-10)",
+          destination: "Drop Point (Blue Area / Islamabad)",
+          timeRange: "1:00 PM - 3:00 PM",
+          fareFormatted: "Rs. 9,500/seat",
+          isRead: false,
+          createdAt: new Date().toISOString()
+        },
+        {
+          driverId: driverId || null,
+          title: "⭐ Route Setup Recommendation",
+          subtitle: "Morning routes (Route A) are experiencing high passenger traffic. Tap to view requests.",
+          routeId: "ROUTE-A",
+          routeName: "Route A",
+          customerCount: 8,
+          type: "NEW_ROUTE_ASSIGNED",
+          pickup: "Pickup Point (I-8 / H-8)",
+          destination: "Drop Point (Blue Area / F-6)",
+          timeRange: "7:00 AM - 9:00 AM",
+          fareFormatted: "Rs. 9,500/seat",
+          isRead: false,
+          createdAt: new Date(Date.now() - 3600000).toISOString()
+        }
+      ];
+
+      try {
+        notifications = await DriverNotification.insertMany(seedNotifs);
+      } catch (_) {
+        notifications = seedNotifs;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      count: notifications.length,
+      notifications
+    });
+  } catch (err) {
+    console.error("Get Driver Notifications Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch driver notifications",
+      error: err.message
+    });
+  }
+};
+
+// 17. MARK DRIVER NOTIFICATION AS READ
+exports.markDriverNotificationRead = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await DriverNotification.findByIdAndUpdate(id, { isRead: true }).catch(() => {});
+    return res.status(200).json({ success: true, message: "Notification marked as read" });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+
+
+// 18. DISMISS CUSTOMER NOTIFICATION
+exports.dismissCustomerNotification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { customerId, phone } = req.body || {};
+
+    if (id) {
+      if (id.match(/^[0-9a-fA-F]{24}$/)) {
+        await CustomerNotification.findByIdAndUpdate(id, { isDismissed: true, isRead: true }).catch(() => {});
+      }
+      await CustomerNotification.updateMany(
+        { $or: [{ notificationId: id }, { rideId: id }] },
+        { isDismissed: true, isRead: true }
+      ).catch(() => {});
+    }
+
+    return res.status(200).json({ success: true, message: "Notification dismissed" });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// 19. CLEAR ALL CUSTOMER NOTIFICATIONS
+exports.clearAllCustomerNotifications = async (req, res) => {
+  try {
+    const { customerId, phone, email } = req.body || {};
+    let queryConds = [];
+    if (customerId) queryConds.push({ customerId });
+    if (phone) queryConds.push({ passengerPhone: phone });
+    if (email) queryConds.push({ passengerEmail: email });
+
+    const query = queryConds.length > 0 ? { $or: queryConds } : {};
+    await CustomerNotification.updateMany(query, { isDismissed: true, isRead: true }).catch(() => {});
+
+    return res.status(200).json({ success: true, message: "All customer notifications cleared" });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};

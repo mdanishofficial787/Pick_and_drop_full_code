@@ -13,6 +13,7 @@ import 'package:ride_and_serve/screens/customer/schedule_pickup_screen.dart';
 import 'package:ride_and_serve/screens/customer/payment_details_screen.dart';
 import 'package:ride_and_serve/screens/customer/customer_payment_history_screen.dart';
 import 'package:ride_and_serve/services/auth_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
 class CustomerDashboardScreen extends StatefulWidget {
@@ -43,6 +44,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _loadDismissedNotifications();
     _loadUserData();
   }
 
@@ -321,91 +323,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
         }
       }
 
-      // 2. Fetch active rides for customer
-      Uri rideUrl = Uri.parse('$baseUrl/api/rides/customer?phone=$phone&email=$email&customerId=$customerId');
-      final rideResponse = await http.get(rideUrl).timeout(const Duration(seconds: 4)).catchError((_) => http.Response('{}', 500));
-
-      if (rideResponse.statusCode == 200) {
-        final data = json.decode(rideResponse.body);
-        final List rides = data['rides'] ?? data['data'] ?? [];
-
-        for (var ride in rides) {
-          final String rideId = ride['requestId'] ?? ride['id'] ?? ride['_id'] ?? '';
-          final String status = ride['status'] ?? 'Pending Dispatch';
-          final String fareText = ride['fareFormatted'] ?? (ride['fare'] != null ? 'Rs. ${formatNumberCustom(ride['fare'])}' : 'Rs. 9,500');
-
-          if (status == 'Driver Unavailable' || status == 'DRIVER_UNAVAILABLE' || ride['driverIssue'] != null) {
-            final driverIssue = ride['driverIssue'] ?? {};
-            fetchedNotifs.add({
-              'id': rideId,
-              'title': 'Driver Unavailable',
-              'subtitle': 'Your assigned driver is unavailable for this ride.',
-              'time': 'Just Now',
-              'status': 'Driver Unavailable',
-              'requestId': rideId,
-              'rideId': rideId,
-              'mongoId': ride['_id'] ?? rideId,
-              'affectedDate': driverIssue['affectedDate'] ?? ride['startingFrom'] ?? 'May 21, 2026',
-              'affectedTime': driverIssue['affectedTime'] ?? '${ride['timeToReach'] ?? "08:00 AM"} - ${ride['timeToLeave'] ?? "10:00 AM"}',
-              'reportedReason': driverIssue['reportedReason'] ?? 'Vehicle Issue',
-              'additionalDetails': driverIssue['additionalDetails'] ?? 'Driver is unavailable due to a sudden mechanical issue with the vehicle.',
-              'isDriverUnavailable': true,
-              'pickup': ride['pickupLocation'] ?? 'Pickup Point',
-              'destination': ride['dropoffLocation'] ?? 'Destination Point',
-            });
-          } else if (status == 'ACCEPTED') {
-            final driverDetails = ride['assignedDriverDetails'] ?? ride['driverDetails'] ?? {};
-            final driverName = ride['assignedDriverName'] ?? driverDetails['name'] ?? 'Driver';
-            fetchedNotifs.add({
-              'id': rideId,
-              'title': '🔔 Ride Accepted by Driver!',
-              'subtitle': 'Driver $driverName accepted ride $rideId.',
-              'time': 'Just Now',
-              'status': status,
-              'requestId': rideId,
-              'customerName': ride['passengerName'] ?? _currentUser?.fullName ?? 'Customer',
-              'fareFormatted': fareText,
-              'driverName': driverName,
-              'driverPhone': driverDetails['phone'] ?? '',
-              'driverCode': driverDetails['driverCode'] ?? 'DRV-Verified',
-              'rating': driverDetails['rating']?.toString() ?? '⭐ 4.9 (Verified Driver)',
-              'vehicle': driverDetails['vehicle'] ?? '🚗 Vehicle',
-              'numberPlate': driverDetails['registrationNumber'] ?? driverDetails['numberPlate'] ?? '🔢 Registered',
-              'pickup': ride['pickupLocation'] ?? 'Pickup Point',
-              'destination': ride['dropoffLocation'] ?? 'Destination Point',
-            });
-          } else if (status == 'COMPLETED' || status == 'Completed') {
-            fetchedNotifs.add({
-              'id': rideId,
-              'title': '✅ Ride Completed!',
-              'subtitle': 'Please submit your payment for this ride.',
-              'time': 'Just Now',
-              'status': 'COMPLETED',
-              'requestId': rideId,
-              'rideId': rideId,
-              'fareFormatted': fareText,
-              'pickup': ride['pickupLocation'] ?? 'Pickup Point',
-              'destination': ride['dropoffLocation'] ?? 'Destination Point',
-            });
-          } else {
-            fetchedNotifs.add({
-              'id': rideId,
-              'title': '💰 Ride Price Updated!',
-              'subtitle': 'Admin has set your ride price to $fareText.',
-              'time': 'Just Now',
-              'status': 'PRICE_UPDATED',
-              'fareResponseStatus': status == 'Fare Accepted' ? 'Fare Accepted' : status == 'Fare Rejected' ? 'Fare Rejected' : 'Pending',
-              'requestId': rideId,
-              'rideId': rideId,
-              'fareFormatted': fareText,
-              'pickup': ride['pickupLocation'] ?? 'Pickup Point',
-              'destination': ride['dropoffLocation'] ?? 'Destination Point',
-            });
-          }
-        }
-      }
-
-      if (fetchedNotifs.isNotEmpty && mounted) {
+      if (mounted) {
         final bool isInitialLoad = _isFirstFetch;
         if (_isFirstFetch) {
           _isFirstFetch = false;
@@ -419,14 +337,14 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
           final String rId = (notif['requestId'] ?? notif['id'] ?? notif['rideId'] ?? '').toString();
           final String status = (notif['status'] ?? '').toString();
           final String fareText = (notif['fareFormatted'] ?? '').toString();
-          final String statusKey = '${rId}_${status}_$fareText';
+          final String notifUniqueKey = (notif['notificationId'] ?? notif['id'] ?? '${rId}_${status}_$fareText').toString();
 
-          if (!seenInThisBatch.contains(statusKey)) {
-            seenInThisBatch.add(statusKey);
-            notif['id'] = rId;
+          if (!seenInThisBatch.contains(notifUniqueKey)) {
+            seenInThisBatch.add(notifUniqueKey);
+            notif['notifKey'] = notifUniqueKey;
 
-            if (!_seenRideStatusIds.contains(statusKey)) {
-              _seenRideStatusIds.add(statusKey);
+            if (!_seenRideStatusIds.contains(notifUniqueKey)) {
+              _seenRideStatusIds.add(notifUniqueKey);
               if (!isInitialLoad) {
                 newlyArrivedCount++;
               }
@@ -435,16 +353,129 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
           }
         }
 
+        final filtered = uniqueNotifs.where((n) {
+          final key = (n['notifKey'] ?? '').toString();
+          final id = (n['id'] ?? '').toString();
+          final rId = (n['rideId'] ?? n['requestId'] ?? '').toString();
+          final st = (n['status'] ?? '').toString();
+          return !_dismissedNotifIds.contains(key) &&
+                 !_dismissedNotifIds.contains(id) &&
+                 !_dismissedNotifIds.contains('${rId}_$st');
+        }).toList();
+
         setState(() {
-          _notifications = uniqueNotifs.where((n) => !_dismissedNotifIds.contains(n['id']?.toString() ?? '')).toList();
+          _notifications = filtered;
           if (!isInitialLoad && newlyArrivedCount > 0) {
             _unreadCount += newlyArrivedCount;
           } else if (isInitialLoad) {
-            _unreadCount = uniqueNotifs.length;
+            _unreadCount = filtered.length;
           }
         });
       }
     } catch (_) {}
+  }
+
+  // Load previously dismissed notification IDs from SharedPreferences
+  Future<void> _loadDismissedNotifications() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getStringList('dismissed_customer_notifs') ?? [];
+      if (mounted) {
+        setState(() {
+          _dismissedNotifIds.addAll(saved);
+        });
+      }
+    } catch (_) {}
+  }
+
+  // Slide to finish / dismiss a single notification
+  Future<void> _dismissNotification(Map<String, dynamic> notif, int index) async {
+    final notifKey = (notif['notifKey'] ?? notif['id'] ?? 'notif_$index').toString();
+    final notifId = (notif['id'] ?? notif['mongoId'] ?? '').toString();
+    final rideId = (notif['rideId'] ?? notif['requestId'] ?? '').toString();
+    final status = (notif['status'] ?? '').toString();
+
+    setState(() {
+      _dismissedNotifIds.add(notifKey);
+      if (notifId.isNotEmpty) _dismissedNotifIds.add(notifId);
+      if (rideId.isNotEmpty && status.isNotEmpty) _dismissedNotifIds.add('${rideId}_$status');
+      _notifications.removeAt(index);
+      if (_unreadCount > 0) _unreadCount--;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('dismissed_customer_notifs', _dismissedNotifIds.toList());
+    } catch (_) {}
+
+    try {
+      final targetId = notif['mongoId'] ?? notif['id'] ?? notif['rideId'] ?? '';
+      if (targetId.isNotEmpty) {
+        http.post(
+          Uri.parse(ApiConstants.dismissCustomerNotification(targetId)),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'customerId': _currentUser?.id,
+            'phone': _currentUser?.phoneNumber,
+          }),
+        ).catchError((_) => http.Response('{}', 500));
+      }
+    } catch (_) {}
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Notification dismissed'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // Clear all notifications
+  Future<void> _clearAllNotifications() async {
+    for (var n in _notifications) {
+      final key = (n['notifKey'] ?? n['id'] ?? '').toString();
+      final id = (n['id'] ?? '').toString();
+      final rId = (n['rideId'] ?? n['requestId'] ?? '').toString();
+      final st = (n['status'] ?? '').toString();
+      if (key.isNotEmpty) _dismissedNotifIds.add(key);
+      if (id.isNotEmpty) _dismissedNotifIds.add(id);
+      if (rId.isNotEmpty && st.isNotEmpty) _dismissedNotifIds.add('${rId}_$st');
+    }
+
+    setState(() {
+      _notifications.clear();
+      _unreadCount = 0;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('dismissed_customer_notifs', _dismissedNotifIds.toList());
+    } catch (_) {}
+
+    try {
+      http.post(
+        Uri.parse(ApiConstants.clearAllCustomerNotifications),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'customerId': _currentUser?.id,
+          'phone': _currentUser?.phoneNumber,
+          'email': _currentUser?.email,
+        }),
+      ).catchError((_) => http.Response('{}', 500));
+    } catch (_) {}
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('All notifications cleared'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   static String formatNumberCustom(dynamic val) {
@@ -1148,13 +1179,46 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                       Text('Ride Notifications', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
                     ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded),
-                    onPressed: () => Navigator.pop(context),
+                  Row(
+                    children: [
+                      if (_notifications.isNotEmpty)
+                        TextButton(
+                          onPressed: () {
+                            _clearAllNotifications();
+                            Navigator.pop(context);
+                          },
+                          child: const Text(
+                            'Clear All',
+                            style: TextStyle(
+                              color: Color(0xFFEF4444),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
+            if (_notifications.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(left: 20.0, right: 20.0, bottom: 8.0),
+                child: Row(
+                  children: [
+                    Icon(Icons.swipe_right_rounded, size: 16, color: Colors.grey.shade500),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Slide right to finish notification',
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                    ),
+                  ],
+                ),
+              ),
             const Divider(),
 
             Expanded(
@@ -1180,25 +1244,70 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                         final isDriverUnavail = (notif['isDriverUnavailable'] == true || notif['status'] == 'Driver Unavailable');
                         final isPriceUpdate = (notif['status'] == 'PRICE_UPDATED');
                         final isCompleted = (notif['status'] == 'COMPLETED' || notif['status'] == 'Completed');
+                        final String notifKey = (notif['notifKey'] ?? notif['id'] ?? 'notif_${notif['status']}_$index').toString();
+
+                        String displayTitle = (notif['title'] ?? 'Ride Update').toString();
+                        if (displayTitle.contains('ðŸ')) {
+                          displayTitle = displayTitle
+                              .replaceAll('ðŸ’°', '💰')
+                              .replaceAll('ðŸš—', '🚗')
+                              .replaceAll('ðŸ”¢', '🔢')
+                              .replaceAll('â­ ', '⭐');
+                        }
 
                         return Dismissible(
-                          key: Key(notif['id']?.toString() ?? 'notif_$index'),
-                          direction: DismissDirection.endToStart,
-                          onDismissed: (direction) {
-                            setState(() {
-                              _dismissedNotifIds.add(notif['id']?.toString() ?? 'notif_$index');
-                              _notifications.removeAt(index);
-                            });
-                          },
+                          key: ValueKey(notifKey),
+                          direction: DismissDirection.horizontal,
                           background: Container(
-                            alignment: Alignment.centerRight,
-                            padding: const EdgeInsets.only(right: 20),
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            alignment: Alignment.centerLeft,
                             decoration: BoxDecoration(
-                              color: const Color(0xFFEF4444), // red-500
+                              color: const Color(0xFFEF4444),
                               borderRadius: BorderRadius.circular(16),
                             ),
-                            child: const Icon(Icons.delete_outline_rounded, color: Colors.white),
+                            child: const Row(
+                              children: [
+                                Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 24),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Dismiss',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13.5,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
+                          secondaryBackground: Container(
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            alignment: Alignment.centerRight,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEF4444),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: const Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                Text(
+                                  'Dismiss',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13.5,
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 24),
+                              ],
+                            ),
+                          ),
+                          onDismissed: (direction) {
+                            _dismissNotification(notif, index);
+                          },
                           child: Card(
                             elevation: 2,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: Colors.grey.shade200)),
@@ -1235,7 +1344,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                               ),
                             ),
                             title: Text(
-                              notif['title'] ?? 'Ride Update',
+                              displayTitle,
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 14,
@@ -1276,9 +1385,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                             ),
                             trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
                             onTap: () {
-                              setState(() {
-                                _notifications.removeAt(index);
-                              });
+                              _dismissNotification(notif, index);
                               Navigator.pop(context);
                               if (isDriverUnavail) {
                                 Navigator.push(

@@ -1,4 +1,7 @@
 require("dotenv").config();
+if (!process.env.JWT_SECRET) {
+  process.env.JWT_SECRET = "86b625c3b62ef67474b1f3e9d33126e2e068ad7a7c87123da95b87216b281a2d5d50f623e114e84178bb8b24df40488120e803d6019d032c4028114d55e79872";
+}
 const dns = require("dns");
 try {
   dns.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);

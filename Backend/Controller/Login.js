@@ -1,4 +1,4 @@
-﻿const Customer = require("../schema/user");
+const Customer = require("../schema/user");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
@@ -28,9 +28,13 @@ module.exports.login = async (req, res) => {
             });
         }
 
-        // 2. Find customer
+        // 2. Find customer (flexible matching: with or without leading 0 / country code)
+        const rawPhone = PhoneNumber.trim();
+        const cleanPhone = rawPhone.replace(/^(\+92|92|0)/, "");
+        const phoneVariants = Array.from(new Set([rawPhone, cleanPhone, "0" + cleanPhone, "+92" + cleanPhone, "92" + cleanPhone]));
+
         const customer = await Customer.findOne({
-            PhoneNumber: PhoneNumber.trim()
+            PhoneNumber: { $in: phoneVariants }
         });
 
         // 3. Customer doesn't exist

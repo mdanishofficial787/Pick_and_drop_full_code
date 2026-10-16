@@ -1,4 +1,4 @@
-﻿const mongoose = require("mongoose");
+const mongoose = require("mongoose");
 
 const CustomerNotificationSchema = new mongoose.Schema(
   {
@@ -108,6 +108,11 @@ const CustomerNotificationSchema = new mongoose.Schema(
     isRead: {
       type: Boolean,
       default: false
+    },
+    isDismissed: {
+      type: Boolean,
+      default: false,
+      index: true
     }
   },
   {
