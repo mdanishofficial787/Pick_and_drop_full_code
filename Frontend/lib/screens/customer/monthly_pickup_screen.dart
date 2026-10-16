@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:ride_and_serve/constants/app_colors.dart';
 import 'package:ride_and_serve/models/user_model.dart';
 import 'package:ride_and_serve/screens/customer/location_map_picker_modal.dart';
 import 'package:ride_and_serve/services/auth_service.dart';
@@ -20,8 +21,8 @@ class MonthlyPickupScreen extends StatefulWidget {
 class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
   CustomerUser? _currentUser;
 
-  // Primary Theme Colors matching exact UI in screenshot
-  static const Color _navyBlue = Color(0xFF0F2B5B);
+  // Primary Theme Colors matching app theme
+  static const Color _navyBlue = AppColors.primaryBlue; // Color(0xFF1A56DB) App theme blue
   static const Color _screenBg = Color(0xFFF4F7FC);
   static const Color _unselectedPillBg = Color(0xFFF8FAFC);
   static const Color _borderColor = Color(0xFFCBD5E1);

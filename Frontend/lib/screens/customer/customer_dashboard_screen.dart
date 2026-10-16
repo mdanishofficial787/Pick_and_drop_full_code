@@ -1669,7 +1669,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF0F2B5B),
+                                  color: _primaryBlue,
                                 ),
                               ),
                               InkWell(
