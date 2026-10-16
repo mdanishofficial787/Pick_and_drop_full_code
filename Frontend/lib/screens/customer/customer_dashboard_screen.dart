@@ -347,6 +347,11 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
               _seenRideStatusIds.add(notifUniqueKey);
               if (!isInitialLoad) {
                 newlyArrivedCount++;
+                if (status == 'ACCEPTED' || status == 'Accepted') {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) _showDriverAcceptedDialog(notif);
+                  });
+                }
               }
             }
             uniqueNotifs.add(notif);
@@ -1385,7 +1390,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                             ),
                             trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
                             onTap: () {
-                              _dismissNotification(notif, index);
                               Navigator.pop(context);
                               if (isDriverUnavail) {
                                 Navigator.push(

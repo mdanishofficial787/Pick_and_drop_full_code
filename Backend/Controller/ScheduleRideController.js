@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const ScheduleRide = require("../schema/ScheduleRide");
 const Driver = require("../schema/Driver");
+const CustomerNotification = require("../schema/CustomerNotification");
 
 // 1. Create Schedule Ride Request (Customer App)
 exports.createScheduleRide = async (req, res) => {
@@ -229,12 +230,56 @@ exports.dispatchScheduleRide = async (req, res) => {
       { returnDocument: "after", new: true }
     );
 
+    // Persist CustomerNotification for assigned schedule ride
+    try {
+      await CustomerNotification.findOneAndUpdate(
+        { notificationId: `${updated.requestId}_ACCEPTED` },
+        {
+          customerId: updated.customerId || updated.passengerPhone,
+          passengerPhone: updated.passengerPhone,
+          passengerEmail: updated.passengerEmail || "",
+          rideId: updated.requestId,
+          mongoId: updated._id ? updated._id.toString() : updated.requestId,
+          notificationId: `${updated.requestId}_ACCEPTED`,
+          title: "🚗 Driver Assigned!",
+          subtitle: `Driver ${assignedName || "A driver"} has been assigned to your scheduled ride (${updated.requestId}).`,
+          status: "ACCEPTED",
+          fareFormatted: updated.fare ? `Rs. ${Number(updated.fare).toLocaleString()}` : "",
+          pickup: updated.pickupLocation || "Pickup Point",
+          destination: updated.dropoffLocation || "Destination Point",
+          driverName: assignedName || "Assigned Driver",
+          driverPhone: "",
+          driverCode: driverId || "",
+          rating: "⭐ 4.9 (Verified Driver)",
+          vehicle: "🚗 Assigned Vehicle",
+          numberPlate: "REGISTERED",
+          isRead: false,
+          isDismissed: false
+        },
+        { upsert: true, new: true }
+      );
+    } catch (notifErr) {
+      console.warn("Failed saving customer notification for dispatched schedule ride:", notifErr.message);
+    }
+
     try {
       const io = req.app.get("io");
       if (io) {
         io.emit("schedule-ride-dispatched", updated);
         io.emit("schedule-ride-update", { type: "SCHEDULE_RIDE_DISPATCHED", ride: updated });
-        console.log("ðŸ“¡ Real-time event emitted: schedule-ride-dispatched", updated.requestId);
+        io.emit("ride_accepted", {
+          requestId: updated.requestId,
+          customerId: updated.customerId,
+          passengerName: updated.passengerName,
+          passengerPhone: updated.passengerPhone,
+          status: "ACCEPTED",
+          driverDetails: {
+            name: assignedName || "Assigned Driver",
+            driverCode: driverId || "DRV-ASSIGNED",
+            vehicle: "Assigned Vehicle"
+          }
+        });
+        console.log("📡 Real-time event emitted: schedule-ride-dispatched", updated.requestId);
       }
     } catch (socketErr) {}
 
@@ -333,18 +378,52 @@ exports.updateScheduleRide = async (req, res) => {
       driver: driverDetails
     };
 
+    // Persist CustomerNotification for Driver Accepted or Assigned
+    if (ride.status === "ACCEPTED" || ride.status === "Accepted" || ride.status === "ASSIGNED") {
+      try {
+        await CustomerNotification.findOneAndUpdate(
+          { notificationId: `${ride.requestId}_ACCEPTED` },
+          {
+            customerId: ride.customerId || ride.passengerPhone,
+            passengerPhone: ride.passengerPhone,
+            passengerEmail: ride.passengerEmail || "",
+            rideId: ride.requestId,
+            mongoId: ride._id ? ride._id.toString() : ride.requestId,
+            notificationId: `${ride.requestId}_ACCEPTED`,
+            title: "🚗 Driver Accepted Ride!",
+            subtitle: `Driver ${driverDetails.name} has accepted your scheduled ride (${ride.requestId}).`,
+            status: "ACCEPTED",
+            fareFormatted: notifyPayload.fareFormatted,
+            pickup: ride.pickupLocation || "Pickup Point",
+            destination: ride.dropoffLocation || "Destination Point",
+            driverName: driverDetails.name,
+            driverPhone: driverDetails.phone,
+            driverCode: driverDetails.driverCode,
+            rating: driverDetails.rating,
+            vehicle: driverDetails.vehicle,
+            numberPlate: driverDetails.numberPlate,
+            isRead: false,
+            isDismissed: false
+          },
+          { upsert: true, new: true }
+        );
+      } catch (notifErr) {
+        console.warn("Failed saving customer notification for accepted schedule ride:", notifErr.message);
+      }
+    }
+
     try {
       const io = req.app.get("io");
       if (io) {
-        if (ride.status === "ACCEPTED") {
+        if (ride.status === "ACCEPTED" || ride.status === "Accepted") {
           io.emit("ride_accepted", notifyPayload);
           io.emit("ride-accepted", notifyPayload);
-          console.log(`ðŸ“¡ Real-time event [ride_accepted] emitted for ${ride.requestId} by driver ${driverDetails.name}`);
+          console.log(`📡 Real-time event [ride_accepted] emitted for ${ride.requestId} by driver ${driverDetails.name}`);
         }
         io.emit("schedule-ride-updated", notifyPayload);
         // Also emit ride-updated so customer app can catch fare update
         io.emit("ride-updated", { ...notifyPayload, id: ride.requestId });
-        console.log(`ðŸ“¡ Emitted [schedule-ride-updated] for ${ride.requestId}`);
+        console.log(`📡 Emitted [schedule-ride-updated] for ${ride.requestId}`);
       }
     } catch (socketErr) {}
 
