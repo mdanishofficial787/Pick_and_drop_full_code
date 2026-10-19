@@ -378,7 +378,7 @@ exports.updateScheduleRide = async (req, res) => {
       driver: driverDetails
     };
 
-    // Persist CustomerNotification for Driver Accepted or Assigned
+    // Persist CustomerNotification for Driver Accepted or Assigned (ONLY Driver Details)
     if (ride.status === "ACCEPTED" || ride.status === "Accepted" || ride.status === "ASSIGNED") {
       try {
         await CustomerNotification.findOneAndUpdate(
@@ -391,7 +391,7 @@ exports.updateScheduleRide = async (req, res) => {
             mongoId: ride._id ? ride._id.toString() : ride.requestId,
             notificationId: `${ride.requestId}_ACCEPTED`,
             title: "🚗 Driver Accepted Ride!",
-            subtitle: `Driver ${driverDetails.name} has accepted your scheduled ride (${ride.requestId}).`,
+            subtitle: `Driver ${driverDetails.name} has accepted your scheduled ride (${ride.requestId}). Tap to view driver details.`,
             status: "ACCEPTED",
             fareFormatted: notifyPayload.fareFormatted,
             pickup: ride.pickupLocation || "Pickup Point",
@@ -412,6 +412,45 @@ exports.updateScheduleRide = async (req, res) => {
       }
     }
 
+    // When Driver COMPLETES Scheduled Ride: Send Payment Notification & Retire Accepted Notification
+    if (ride.status === "COMPLETED" || ride.status === "Completed") {
+      try {
+        await CustomerNotification.updateMany(
+          { rideId: ride.requestId, status: "ACCEPTED" },
+          { isDismissed: true }
+        ).catch(() => {});
+
+        await CustomerNotification.findOneAndUpdate(
+          { notificationId: `${ride.requestId}_COMPLETED` },
+          {
+            customerId: ride.customerId || ride.passengerPhone,
+            passengerPhone: ride.passengerPhone,
+            passengerEmail: ride.passengerEmail || "",
+            rideId: ride.requestId,
+            mongoId: ride._id ? ride._id.toString() : ride.requestId,
+            notificationId: `${ride.requestId}_COMPLETED`,
+            title: "💳 Ride Completed - Pay Fare",
+            subtitle: `Your ride ${ride.requestId} is complete. Please tap to submit payment of ${notifyPayload.fareFormatted}.`,
+            status: "COMPLETED",
+            fareFormatted: notifyPayload.fareFormatted,
+            pickup: ride.pickupLocation || "Pickup Point",
+            destination: ride.dropoffLocation || "Destination Point",
+            driverName: driverDetails.name,
+            driverPhone: driverDetails.phone,
+            driverCode: driverDetails.driverCode,
+            rating: driverDetails.rating,
+            vehicle: driverDetails.vehicle,
+            numberPlate: driverDetails.numberPlate,
+            isRead: false,
+            isDismissed: false
+          },
+          { upsert: true, new: true }
+        );
+      } catch (notifErr) {
+        console.warn("Failed saving customer notification for completed schedule ride:", notifErr.message);
+      }
+    }
+
     try {
       const io = req.app.get("io");
       if (io) {
@@ -419,6 +458,11 @@ exports.updateScheduleRide = async (req, res) => {
           io.emit("ride_accepted", notifyPayload);
           io.emit("ride-accepted", notifyPayload);
           console.log(`📡 Real-time event [ride_accepted] emitted for ${ride.requestId} by driver ${driverDetails.name}`);
+        }
+        if (ride.status === "COMPLETED" || ride.status === "Completed") {
+          io.emit("ride_completed", notifyPayload);
+          io.emit("ride-completed", notifyPayload);
+          console.log(`📡 Real-time event [ride_completed] emitted for ${ride.requestId}`);
         }
         io.emit("schedule-ride-updated", notifyPayload);
         // Also emit ride-updated so customer app can catch fare update

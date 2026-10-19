@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:ride_and_serve/screens/welcome_screen.dart';
+import 'package:ride_and_serve/screens/splash_screen.dart';
 import 'package:ride_and_serve/theme/app_theme.dart';
 
 void main() {
@@ -16,7 +16,7 @@ class RideAndServeApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Ride & Serve',
       theme: AppTheme.lightTheme,
-      home: const AccountTypeScreen(),
+      home: const SplashScreen(),
     );
   }
 }

@@ -247,7 +247,11 @@ return res.status(201).json({
 
 module.exports.updateProfile = async (req, res) => {
   try {
-    const { fullName, Email, PhoneNumber, customerId } = req.body;
+    const fullName = req.body.fullName || req.body.name;
+    const Email = req.body.Email || req.body.email;
+    const PhoneNumber = req.body.PhoneNumber || req.body.phoneNumber || req.body.phone;
+    const customerId = req.body.customerId || req.body.userId || req.body.id;
+
     let userId = req.user ? (req.user._id || req.user.id) : customerId;
 
     if (!userId && req.body.userId) userId = req.body.userId;
@@ -257,10 +261,10 @@ module.exports.updateProfile = async (req, res) => {
       user = await Customer.findById(userId);
     }
     if (!user && Email) {
-      user = await Customer.findOne({ Email: Email.trim().toLowerCase() });
+      user = await Customer.findOne({ Email: Email.toString().trim().toLowerCase() });
     }
     if (!user && PhoneNumber) {
-      user = await Customer.findOne({ PhoneNumber: PhoneNumber.trim() });
+      user = await Customer.findOne({ PhoneNumber: PhoneNumber.toString().trim() });
     }
 
     if (!user) {
@@ -270,9 +274,39 @@ module.exports.updateProfile = async (req, res) => {
       });
     }
 
-    if (fullName) user.fullName = fullName.trim();
-    if (Email) user.Email = Email.trim().toLowerCase();
-    if (PhoneNumber) user.PhoneNumber = PhoneNumber.trim();
+    if (fullName && fullName.toString().trim().length > 0) {
+      user.fullName = fullName.toString().trim();
+    }
+
+    if (Email && Email.toString().trim().toLowerCase() !== (user.Email || "").toLowerCase()) {
+      const cleanEmail = Email.toString().trim().toLowerCase();
+      const existingEmail = await Customer.findOne({
+        Email: cleanEmail,
+        _id: { $ne: user._id }
+      });
+      if (existingEmail) {
+        return res.status(400).json({
+          success: false,
+          message: "Email is already registered with another account"
+        });
+      }
+      user.Email = cleanEmail;
+    }
+
+    if (PhoneNumber && PhoneNumber.toString().trim() !== (user.PhoneNumber || "")) {
+      const cleanPhone = PhoneNumber.toString().trim();
+      const existingPhone = await Customer.findOne({
+        PhoneNumber: cleanPhone,
+        _id: { $ne: user._id }
+      });
+      if (existingPhone) {
+        return res.status(400).json({
+          success: false,
+          message: "Phone number is already registered with another account"
+        });
+      }
+      user.PhoneNumber = cleanPhone;
+    }
 
     if (req.file) {
       try {
@@ -307,6 +341,7 @@ module.exports.updateProfile = async (req, res) => {
         phoneNumber: user.PhoneNumber,
         countryCode: user.countryCode || "+92",
         CustomerPhoto: user.CustomerPhoto,
+        photoUrl: user.CustomerPhoto ? user.CustomerPhoto.url : null,
         isVerified: user.isVerified || true
       }
     });

@@ -13,6 +13,20 @@ const DriverNotificationSchema = new mongoose.Schema(
       required: false,
       default: ""
     },
+    driverName: {
+      type: String,
+      default: ""
+    },
+    rideId: {
+      type: String,
+      default: "",
+      index: true
+    },
+    notificationId: {
+      type: String,
+      default: "",
+      index: true
+    },
     title: {
       type: String,
       required: true
@@ -20,6 +34,14 @@ const DriverNotificationSchema = new mongoose.Schema(
     subtitle: {
       type: String,
       required: true
+    },
+    customerName: {
+      type: String,
+      default: ""
+    },
+    customerPhone: {
+      type: String,
+      default: ""
     },
     routeId: {
       type: String,
@@ -36,6 +58,10 @@ const DriverNotificationSchema = new mongoose.Schema(
     type: {
       type: String,
       default: "ROUTE_NOTIFICATION"
+    },
+    status: {
+      type: String,
+      default: ""
     },
     pickup: {
       type: String,
@@ -56,6 +82,15 @@ const DriverNotificationSchema = new mongoose.Schema(
     isRead: {
       type: Boolean,
       default: false
+    },
+    isDismissed: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
+    payload: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
     }
   },
   {

@@ -56,23 +56,25 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     super.dispose();
   }
 
+  // FIXED: always prefer the latest saved user (name + photo) from storage.
+  // widget.user is only a fallback, because it never changes after login.
   Future<void> _loadUserData() async {
-    if (widget.user != null) {
-      setState(() {
-        _currentUser = widget.user;
-        _isLoading = false;
-      });
-    } else {
-      final user = await AuthService.getCurrentUser();
-      if (mounted) {
-        setState(() {
-          _currentUser = user;
-          _isLoading = false;
-        });
-      }
-    }
+    final saved = await AuthService.getCurrentUser();
+    if (!mounted) return;
+    setState(() {
+      _currentUser = saved ?? widget.user;
+      _isLoading = false;
+    });
     _initSocketConnection();
     _startNotificationPolling();
+  }
+
+  // FIXED: lightweight reload used after returning from Profile View.
+  // Only refreshes the user; it does NOT reopen the socket or restart polling.
+  Future<void> _refreshUser() async {
+    final fresh = await AuthService.getCurrentUser();
+    if (!mounted) return;
+    setState(() => _currentUser = fresh ?? _currentUser);
   }
 
   void _initSocketConnection() {
@@ -658,195 +660,341 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     );
   }
 
-  // Open Full Driver Details Dialog
-  void _showDriverAcceptedDialog(Map<String, dynamic> notif) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+  // Send Customer Accept Ride Response to Backend & notify Driver
+  Future<bool> _acceptRideAsCustomer(Map<String, dynamic> notif) async {
+    try {
+      final baseUrl = ApiConstants.baseUrl;
+      final rideId = notif['requestId'] ?? notif['id'] ?? notif['rideId'] ?? '';
+      final customerName = _currentUser?.fullName ?? _currentUser?.phoneNumber ?? 'Customer';
+      final customerPhone = _currentUser?.phoneNumber ?? '';
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/rides/customer-accept'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'rideId': rideId,
+          'customerId': _currentUser?.id,
+          'customerName': customerName,
+          'customerPhone': customerPhone,
+        }),
+      ).timeout(const Duration(seconds: 8));
+
+      final bool isSuccess = response.statusCode == 200 || response.statusCode == 201;
+
+      if (mounted) {
+        if (isSuccess) {
+          setState(() {
+            notif['customerAccepted'] = true;
+            notif['status'] = 'CUSTOMER_ACCEPTED';
+            notif['subtitle'] = 'You accepted this ride. Driver ${notif['driverName'] ?? ''} has been notified!';
+          });
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF10B981),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            content: Row(
               children: [
-                // Header Badge
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 48),
-                ),
-                const SizedBox(height: 12),
-
-                const Text(
-                  'RIDE ACCEPTED BY DRIVER!',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A), letterSpacing: 0.5),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Request ID: ${notif['requestId']}',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _primaryBlue),
-                ),
-
-                const SizedBox(height: 16),
-                const Divider(height: 1),
-                const SizedBox(height: 16),
-
-                // Driver Info Card
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          if (_currentUser?.photoUrl != null && _currentUser!.photoUrl!.isNotEmpty)
-                            CircleAvatar(
-                              radius: 28,
-                              backgroundColor: Colors.transparent,
-                              backgroundImage: NetworkImage(_currentUser!.photoUrl!.startsWith('http') ? _currentUser!.photoUrl! : '${ApiConstants.baseUrl}/${_currentUser!.photoUrl!.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '')}'),
-                            )
-                          else
-                            CircleAvatar(
-                              radius: 28,
-                              backgroundColor: _primaryBlue.withValues(alpha: 0.1),
-                              child: const Icon(Icons.person_rounded, color: _primaryBlue, size: 32),
-                            ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  notif['driverName'] ?? 'Assigned Driver',
-                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  notif['driverPhone'] != null && notif['driverPhone'].toString().isNotEmpty ? notif['driverPhone'].toString() : 'Verified Driver',
-                                  style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
-                                ),
-                                const SizedBox(height: 4),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFFEF3C7),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    notif['rating'] ?? '⭐ 4.9 (Verified Driver)',
-                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD97706)),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      const Divider(height: 1, color: Color(0xFFCBD5E1)),
-                      const SizedBox(height: 12),
-
-                      _DetailRow(icon: Icons.badge_outlined, label: 'Driver Code', value: notif['driverCode'] ?? 'DRV-1788328584103-ECAP0L'),
-                      const SizedBox(height: 8),
-                      _DetailRow(icon: Icons.directions_car_outlined, label: 'Vehicle', value: notif['vehicle'] ?? 'Honda Accord (Super White)'),
-                      const SizedBox(height: 8),
-                      _DetailRow(icon: Icons.numbers_rounded, label: 'Number Plate', value: notif['numberPlate'] ?? 'ISB-0009'),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
-                // Trip Fare & Route Card
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEFF6FF),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFBFDBFE)),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Agreed Fare', style: TextStyle(fontSize: 13, color: Color(0xFF475569), fontWeight: FontWeight.w500)),
-                          Text(
-                            notif['fareFormatted'] ?? 'Rs. 9,500',
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _primaryBlue),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(Icons.trip_origin_rounded, color: Colors.green, size: 16),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              notif['pickup'] ?? '',
-                              style: const TextStyle(fontSize: 12, color: Color(0xFF334155)),
-                              maxLines: 2,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(Icons.location_on_rounded, color: Colors.redAccent, size: 16),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              notif['destination'] ?? '',
-                              style: const TextStyle(fontSize: 12, color: Color(0xFF334155)),
-                              maxLines: 2,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // Action Buttons
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _primaryBlue,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                    icon: const Icon(Icons.check_circle_outline, color: Colors.white),
-                    label: const Text('OKAY, GOT IT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
-                    onPressed: () {
-                      Navigator.pop(context);
-                      setState(() {
-                        _notifications.removeWhere((n) => n['id'] == notif['id'] || n['requestId'] == notif['requestId']);
-                        if (_unreadCount > 0) _unreadCount--;
-                      });
-                    },
+                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '🎉 Ride accepted! Notification sent to Driver ${notif['driverName'] ?? ''}.',
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13),
                   ),
                 ),
               ],
             ),
           ),
-        ),
+        );
+      }
+      return true;
+    } catch (err) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.redAccent,
+            content: Text('Failed to accept ride: $err'),
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
+  // Open Full Driver Details Dialog with ACCEPT RIDE option
+  void _showDriverAcceptedDialog(Map<String, dynamic> notif) {
+    bool isSubmitting = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final isAccepted = notif['customerAccepted'] == true || notif['status'] == 'CUSTOMER_ACCEPTED';
+
+          return Dialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Header Badge
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 48),
+                    ),
+                    const SizedBox(height: 12),
+
+                    Text(
+                      isAccepted ? 'RIDE ACCEPTED & CONFIRMED!' : 'RIDE ACCEPTED BY DRIVER!',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A), letterSpacing: 0.5),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Request ID: ${notif['requestId']}',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _primaryBlue),
+                    ),
+
+                    const SizedBox(height: 16),
+                    const Divider(height: 1),
+                    const SizedBox(height: 16),
+
+                    // Driver Info Card
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              if (_currentUser?.photoUrl != null && _currentUser!.photoUrl!.isNotEmpty)
+                                CircleAvatar(
+                                  radius: 28,
+                                  backgroundColor: Colors.transparent,
+                                  backgroundImage: NetworkImage(_currentUser!.photoUrl!.startsWith('http') ? _currentUser!.photoUrl! : '${ApiConstants.baseUrl}/${_currentUser!.photoUrl!.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '')}'),
+                                )
+                              else
+                                CircleAvatar(
+                                  radius: 28,
+                                  backgroundColor: _primaryBlue.withValues(alpha: 0.1),
+                                  child: const Icon(Icons.person_rounded, color: _primaryBlue, size: 32),
+                                ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      notif['driverName'] ?? 'Assigned Driver',
+                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      notif['driverPhone'] != null && notif['driverPhone'].toString().isNotEmpty ? notif['driverPhone'].toString() : 'Verified Driver',
+                                      style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFFEF3C7),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        notif['rating'] ?? '⭐ 4.9 (Verified Driver)',
+                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD97706)),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          const Divider(height: 1, color: Color(0xFFCBD5E1)),
+                          const SizedBox(height: 12),
+
+                          _DetailRow(icon: Icons.badge_outlined, label: 'Driver Code', value: notif['driverCode'] ?? 'DRV-1788328584103-ECAP0L'),
+                          const SizedBox(height: 8),
+                          _DetailRow(icon: Icons.directions_car_outlined, label: 'Vehicle', value: notif['vehicle'] ?? 'Honda Accord (Super White)'),
+                          const SizedBox(height: 8),
+                          _DetailRow(icon: Icons.numbers_rounded, label: 'Number Plate', value: notif['numberPlate'] ?? 'ISB-0009'),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Trip Fare & Route Card
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFBFDBFE)),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Agreed Fare', style: TextStyle(fontSize: 13, color: Color(0xFF475569), fontWeight: FontWeight.w500)),
+                              Text(
+                                notif['fareFormatted'] ?? 'Rs. 9,500',
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _primaryBlue),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.trip_origin_rounded, color: Colors.green, size: 16),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  notif['pickup'] ?? '',
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFF334155)),
+                                  maxLines: 2,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.location_on_rounded, color: Colors.redAccent, size: 16),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  notif['destination'] ?? '',
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFF334155)),
+                                  maxLines: 2,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    if (isAccepted) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFDCFCE7),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFF86EFAC)),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.check_circle_rounded, color: Color(0xFF16A34A), size: 20),
+                            SizedBox(width: 8),
+                            Text(
+                              'You have ACCEPTED this ride.',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                                color: Color(0xFF16A34A),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _primaryBlue,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          icon: const Icon(Icons.check_rounded, color: Colors.white),
+                          label: const Text('OKAY, GOT IT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ),
+                    ] else ...[
+                      if (isSubmitting)
+                        const Padding(
+                          padding: EdgeInsets.all(12.0),
+                          child: CircularProgressIndicator(),
+                        )
+                      else ...[
+                        // ACCEPT RIDE BUTTON
+                        SizedBox(
+                          width: double.infinity,
+                          height: 50,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF10B981),
+                              foregroundColor: Colors.white,
+                              elevation: 2,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            ),
+                            icon: const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                            label: const Text(
+                              'ACCEPT RIDE',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white, letterSpacing: 0.5),
+                            ),
+                            onPressed: () async {
+                              setDialogState(() {
+                                isSubmitting = true;
+                              });
+                              final ok = await _acceptRideAsCustomer(notif);
+                              if (context.mounted) {
+                                if (ok) {
+                                  Navigator.pop(context);
+                                } else {
+                                  setDialogState(() {
+                                    isSubmitting = false;
+                                  });
+                                }
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 44,
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF64748B),
+                              side: const BorderSide(color: Color(0xFFCBD5E1)),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            ),
+                            child: const Text('DISMISS / CLOSE', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -1424,6 +1572,8 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   }
 
   // Open Profile View Screen
+  // FIXED: after coming back, reload the latest saved user so the new
+  // name and photo show in the header.
   void _showProfileDialog() async {
     await Navigator.push(
       context,
@@ -1431,7 +1581,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
         builder: (context) => ProfileViewScreen(user: _currentUser),
       ),
     );
-    _loadUserData();
+    await _refreshUser();
   }
 
   // Payment Details Navigation
@@ -1443,10 +1593,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       ),
     );
   }
-
-
-
-
 
   void _onItemTap(String title) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1463,6 +1609,12 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     final displayName = (rawName != null && rawName.isNotEmpty)
         ? rawName
         : 'Arbab';
+
+    final String? headerPhoto = (_currentUser?.photoUrl != null && _currentUser!.photoUrl!.isNotEmpty)
+        ? (_currentUser!.photoUrl!.startsWith('http')
+            ? _currentUser!.photoUrl!
+            : '${ApiConstants.baseUrl}/${_currentUser!.photoUrl!.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '')}')
+        : null;
 
     return Scaffold(
       backgroundColor: _screenBg,
@@ -1504,9 +1656,10 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                               ],
                             ),
                             child: ClipOval(
-                              child: (_currentUser?.photoUrl != null && _currentUser!.photoUrl!.isNotEmpty)
+                              child: headerPhoto != null
                                   ? Image.network(
-                                      _currentUser!.photoUrl!.startsWith('http') ? _currentUser!.photoUrl! : '${ApiConstants.baseUrl}/${_currentUser!.photoUrl!.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '')}',
+                                      headerPhoto,
+                                      key: ValueKey(headerPhoto), // forces a rebuild when the photo changes
                                       fit: BoxFit.cover,
                                       errorBuilder: (c, e, s) => const Icon(Icons.person, color: _primaryBlue, size: 36),
                                     )

@@ -198,12 +198,14 @@ class AuthService {
       ApiConstants.checkSession,
       requireAuth: true,
     );
-    if (response.isSuccess && response.data is Map<String, dynamic>) {
-      final data = response.data as Map<String, dynamic>;
-      if (data['customer'] != null) {
-        final user = CustomerUser.fromJson(data['customer'] as Map<String, dynamic>);
+    if (response.isSuccess && response.data is Map) {
+      final data = Map<String, dynamic>.from(response.data as Map);
+      final rawCustomer = data['customer'] ?? data['user'];
+      if (rawCustomer is Map) {
+        final user = CustomerUser.fromJson(Map<String, dynamic>.from(rawCustomer as Map));
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(_keyUser, user.toJsonString());
+        debugPrint('checkSession updated stored user: ${user.fullName}, ${user.phoneNumber}, ${user.photoUrl}');
       }
       return true;
     }
@@ -245,6 +247,7 @@ class AuthService {
     return token != null && token.isNotEmpty;
   }
 
+  // 11. Update Profile (FIXED)
   static Future<ApiResponse> updateProfile({
     required String fullName,
     required String email,
@@ -269,13 +272,31 @@ class AuthService {
       requireAuth: true,
     );
 
-    if (response.isSuccess && response.data is Map<String, dynamic>) {
-      final data = response.data as Map<String, dynamic>;
-      final updatedUserJson = data['customer'] ?? data['user'];
-      if (updatedUserJson != null && updatedUserJson is Map<String, dynamic>) {
-        final updatedUser = CustomerUser.fromJson(updatedUserJson);
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_keyUser, updatedUser.toJsonString());
+    // Shows exactly what the server returned (check your debug console)
+    debugPrint(
+      'updateProfile success=${response.isSuccess} '
+      'message=${response.message} data=${response.data}',
+    );
+
+    if (response.isSuccess) {
+      bool cached = false;
+
+      if (response.data is Map) {
+        final data = Map<String, dynamic>.from(response.data as Map);
+        final rawUser = data['customer'] ?? data['user'] ?? data['data'];
+        if (rawUser is Map) {
+          final updatedUserJson = Map<String, dynamic>.from(rawUser as Map);
+          final updatedUser = CustomerUser.fromJson(updatedUserJson);
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_keyUser, updatedUser.toJsonString());
+          cached = true;
+          debugPrint('updateProfile stored user in SharedPreferences: ${updatedUser.fullName}, ${updatedUser.phoneNumber}, ${updatedUser.photoUrl}');
+        }
+      }
+
+      // Server did not return the user or caching failed, so re-fetch it from the backend
+      if (!cached) {
+        await checkSession();
       }
     }
     return response;

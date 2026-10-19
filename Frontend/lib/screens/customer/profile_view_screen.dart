@@ -17,22 +17,24 @@ class ProfileViewScreen extends StatefulWidget {
 class _ProfileViewScreenState extends State<ProfileViewScreen> {
   CustomerUser? _currentUser;
 
+  // Becomes true after a successful edit, so the parent screen can refresh too
+  bool _profileChanged = false;
+
   static const Color _screenBg = Color(0xFFF4F7FC);
   static const Color _borderColor = Color(0xFFCBD5E1);
 
   @override
   void initState() {
     super.initState();
-    _loadUser();
+    _currentUser = widget.user; // show something immediately
+    _loadUser(); // then load the latest saved data
   }
 
+  // FIXED: always read the latest user from storage
   Future<void> _loadUser() async {
-    if (widget.user != null) {
-      _currentUser = widget.user;
-    } else {
-      _currentUser = await AuthService.getCurrentUser();
-    }
-    if (mounted) setState(() {});
+    final fresh = await AuthService.getCurrentUser();
+    if (!mounted) return;
+    setState(() => _currentUser = fresh ?? widget.user);
   }
 
   void _handleLogout() async {
@@ -47,7 +49,9 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final name = _currentUser?.fullName ?? 'Ali';
+    final name = (_currentUser?.fullName.isNotEmpty ?? false)
+        ? _currentUser!.fullName
+        : 'Guest';
 
     return Scaffold(
       backgroundColor: _screenBg,
@@ -56,7 +60,8 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Color(0xFF0F172A)),
-          onPressed: () => Navigator.pop(context),
+          // Tells the parent screen whether the profile changed
+          onPressed: () => Navigator.pop(context, _profileChanged),
         ),
         title: const Text(
           'Profile View',
@@ -89,7 +94,11 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
                   ),
                   child: ClipOval(
                     child: (_currentUser?.photoUrl != null && _currentUser!.photoUrl!.isNotEmpty)
-                        ? Image.network(_currentUser!.photoUrl!, fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.person, size: 50, color: Color(0xFF2563EB)))
+                        ? Image.network(
+                            _currentUser!.photoUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (c, e, s) => const Icon(Icons.person, size: 50, color: Color(0xFF2563EB)),
+                          )
                         : const Icon(Icons.person, size: 50, color: Color(0xFF2563EB)),
                   ),
                 ),
@@ -150,14 +159,16 @@ class _ProfileViewScreenState extends State<ProfileViewScreen> {
                       iconColor: const Color(0xFF2563EB),
                       title: 'Edit Profile',
                       onTap: () async {
-                        final updated = await Navigator.push(
+                        final updated = await Navigator.push<bool>(
                           context,
                           MaterialPageRoute(
                             builder: (ctx) => EditProfileScreen(user: _currentUser),
                           ),
                         );
-                        if (updated != null && mounted) {
-                          _loadUser();
+                        // FIXED: reload only when the edit screen saved successfully
+                        if (updated == true && mounted) {
+                          _profileChanged = true;
+                          await _loadUser();
                         }
                       },
                     ),

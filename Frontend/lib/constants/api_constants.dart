@@ -67,8 +67,12 @@ class ApiConstants {
   static String get customerNotifications => '$baseUrl/api/rides/customer-notifications';
   static String dismissCustomerNotification(String id) => '$baseUrl/api/rides/customer-notifications/$id/dismiss';
   static String get clearAllCustomerNotifications => '$baseUrl/api/rides/customer-notifications/clear-all';
+  static String get acceptRideByCustomer => '$baseUrl/api/rides/customer-accept';
+  static String customerAcceptRide(String id) => '$baseUrl/api/rides/$id/customer-accept';
   static String get driverNotifications => '$baseUrl/api/rides/driver-notifications';
   static String markDriverNotificationRead(String id) => '$baseUrl/api/rides/driver-notifications/$id/read';
+  static String dismissDriverNotification(String id) => '$baseUrl/api/rides/driver-notifications/$id/dismiss';
+  static String get clearAllDriverNotifications => '$baseUrl/api/rides/driver-notifications/clear-all';
   static String get suggestedRoutes => '$baseUrl/api/rides/suggested-routes';
   static String get acceptRoute => '$baseUrl/api/rides/accept-route';
   static String togglePreferredRoute(String id) => '$baseUrl/api/rides/suggested-routes/$id/preferred';

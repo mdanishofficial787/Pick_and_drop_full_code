@@ -47,8 +47,10 @@ router.get(
 );
 
 // Update Customer Profile
+// Update Customer Profile
 router.put(
   "/update-profile",
+  authMiddleware,
   uploadSingleImage("CustomerPhoto"),
   signupController.updateProfile
 );

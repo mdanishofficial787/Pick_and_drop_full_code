@@ -18,7 +18,10 @@ const {
   acceptSuggestedRoute,
   setPreferredRoute,
   getDriverNotifications,
-  markDriverNotificationRead
+  markDriverNotificationRead,
+  dismissDriverNotification,
+  clearAllDriverNotifications,
+  acceptRideByCustomer
 } = require("../Controller/RideController");
 
 // Suggested Routes & Match Setup
@@ -31,8 +34,13 @@ router.patch("/suggested-routes/:id/preferred", setPreferredRoute);
 router.get("/driver-notifications", getDriverNotifications);
 router.patch("/driver-notifications/:id/read", markDriverNotificationRead);
 router.post("/driver-notifications/:id/read", markDriverNotificationRead);
+router.post("/driver-notifications/:id/dismiss", dismissDriverNotification);
+router.delete("/driver-notifications/:id", dismissDriverNotification);
+router.post("/driver-notifications/clear-all", clearAllDriverNotifications);
 
-// Customer booking
+// Customer booking & Ride Acceptance
+router.post("/customer-accept", acceptRideByCustomer);
+router.post("/:id/customer-accept", acceptRideByCustomer);
 router.post("/monthly", createMonthlyRide);
 router.post("/", createMonthlyRide);
 router.get("/customer", getCustomerRides);

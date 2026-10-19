@@ -538,7 +538,7 @@ exports.updateRide = async (req, res) => {
       driver: driverDetails
     };
 
-    // Persist CustomerNotification for Driver Accepted or Assigned
+    // Persist CustomerNotification for Driver Accepted or Assigned (ONLY Driver Details)
     if (updatedRide.status === "ACCEPTED" || updatedRide.status === "Accepted" || updatedRide.status === "ASSIGNED") {
       try {
         await CustomerNotification.findOneAndUpdate(
@@ -551,7 +551,7 @@ exports.updateRide = async (req, res) => {
             mongoId: updatedRide._id ? updatedRide._id.toString() : updatedRide.requestId,
             notificationId: `${updatedRide.requestId}_ACCEPTED`,
             title: "🚗 Driver Accepted Ride!",
-            subtitle: `Driver ${driverDetails.name} has accepted your ride request (${updatedRide.requestId}).`,
+            subtitle: `Driver ${driverDetails.name} has accepted your ride (${updatedRide.requestId}). Tap to view driver details.`,
             status: "ACCEPTED",
             fareFormatted: notifyPayload.fareFormatted,
             pickup: updatedRide.pickupLocation || "Pickup Point",
@@ -572,7 +572,47 @@ exports.updateRide = async (req, res) => {
       }
     }
 
-    // Emit Real-time Socket.IO notification ONLY when Driver ACCEPTS
+    // When Driver COMPLETES Ride: Send Payment Notification & Retire Accepted Notification
+    if (updatedRide.status === "COMPLETED" || updatedRide.status === "Completed") {
+      try {
+        // Mark old accepted notification for this ride as dismissed so customer now sees payment notification
+        await CustomerNotification.updateMany(
+          { rideId: updatedRide.requestId, status: "ACCEPTED" },
+          { isDismissed: true }
+        ).catch(() => {});
+
+        await CustomerNotification.findOneAndUpdate(
+          { notificationId: `${updatedRide.requestId}_COMPLETED` },
+          {
+            customerId: updatedRide.customerId || updatedRide.passengerPhone,
+            passengerPhone: updatedRide.passengerPhone,
+            passengerEmail: updatedRide.passengerEmail || "",
+            rideId: updatedRide.requestId,
+            mongoId: updatedRide._id ? updatedRide._id.toString() : updatedRide.requestId,
+            notificationId: `${updatedRide.requestId}_COMPLETED`,
+            title: "💳 Ride Completed - Pay Fare",
+            subtitle: `Your ride ${updatedRide.requestId} is complete. Please tap to submit payment of ${notifyPayload.fareFormatted}.`,
+            status: "COMPLETED",
+            fareFormatted: notifyPayload.fareFormatted,
+            pickup: updatedRide.pickupLocation || "Pickup Point",
+            destination: updatedRide.dropoffLocation || "Destination Point",
+            driverName: driverDetails.name,
+            driverPhone: driverDetails.phone,
+            driverCode: driverDetails.driverCode,
+            rating: driverDetails.rating,
+            vehicle: driverDetails.vehicle,
+            numberPlate: driverDetails.numberPlate,
+            isRead: false,
+            isDismissed: false
+          },
+          { upsert: true, new: true }
+        );
+      } catch (notifErr) {
+        console.warn("Failed saving customer notification for completed ride:", notifErr.message);
+      }
+    }
+
+    // Emit Real-time Socket.IO events
     try {
       const io = req.app.get("io");
       if (io) {
@@ -580,6 +620,11 @@ exports.updateRide = async (req, res) => {
           io.emit("ride_accepted", notifyPayload);
           io.emit("ride-accepted", notifyPayload);
           console.log(`📡 Real-time event [ride_accepted] emitted for ${updatedRide.requestId} by driver ${driverDetails.name}`);
+        }
+        if (updatedRide.status === "COMPLETED" || updatedRide.status === "Completed") {
+          io.emit("ride_completed", notifyPayload);
+          io.emit("ride-completed", notifyPayload);
+          console.log(`📡 Real-time event [ride_completed] emitted for ${updatedRide.requestId}`);
         }
         io.emit("ride-updated", notifyPayload);
       }
@@ -784,16 +829,31 @@ exports.getCustomerNotifications = async (req, res) => {
       }
     }
     if (phone) {
-      const cleanPhone = phone.trim();
-      const stripped = cleanPhone.replace(/^\+92/, "").replace(/^0/, "");
-      queryConds.push({ passengerPhone: cleanPhone });
-      queryConds.push({ passengerPhone: stripped });
-      queryConds.push({ passengerPhone: `0${stripped}` });
-      queryConds.push({ passengerPhone: `+92${stripped}` });
-      queryConds.push({ "passenger.phone": cleanPhone });
-      queryConds.push({ "passenger.phone": stripped });
-      queryConds.push({ "passenger.phone": `0${stripped}` });
-      queryConds.push({ "passenger.phone": `+92${stripped}` });
+      const rawPhone = String(phone).trim();
+      const digitsOnly = rawPhone.replace(/\D/g, "");
+      const core = digitsOnly.replace(/^92/, "").replace(/^0/, "");
+
+      const variations = [
+        rawPhone,
+        digitsOnly,
+        core,
+        `0${core}`,
+        `+92${core}`,
+        `92${core}`,
+        `+92 ${core}`,
+        `0${core.slice(0, 3)} ${core.slice(3)}`
+      ];
+
+      for (const v of variations) {
+        if (v && v.length >= 7) {
+          queryConds.push({ passengerPhone: v });
+          queryConds.push({ "passenger.phone": v });
+        }
+      }
+      if (core && core.length >= 9) {
+        queryConds.push({ passengerPhone: new RegExp(`${core}$`) });
+        queryConds.push({ "passenger.phone": new RegExp(`${core}$`) });
+      }
     }
     if (email) {
       const cleanEmail = email.trim();
@@ -832,7 +892,7 @@ exports.getCustomerNotifications = async (req, res) => {
       const rId = r.requestId || r._id.toString();
       const fareText = r.fare ? `Rs. ${Number(r.fare).toLocaleString()}` : "Rs. 9,500";
 
-      // A) Driver Accepted / Assigned
+      // A) Driver Accepted / Assigned (ONLY Driver Details notification)
       if (r.status === "ACCEPTED" || r.status === "Accepted" || r.status === "ASSIGNED" || r.status === "Driver Assigned") {
         const notifKey = `${rId}_ACCEPTED`;
         if (!dismissedKeys.has(notifKey) && !dismissedRideIds.has(rId)) {
@@ -847,7 +907,7 @@ exports.getCustomerNotifications = async (req, res) => {
             id: `${rId}_accepted`,
             notificationId: `${rId}_accepted`,
             title: "🚗 Driver Accepted Ride!",
-            subtitle: `Driver ${driverName} has accepted your ride request (${rId}).`,
+            subtitle: `Driver ${driverName} has accepted your ride (${rId}). Tap to view driver details.`,
             rideId: rId,
             requestId: rId,
             mongoId: r._id ? r._id.toString() : rId,
@@ -920,15 +980,15 @@ exports.getCustomerNotifications = async (req, res) => {
         }
       }
 
-      // D) Ride Completed
+      // D) Ride Completed (Payment Notification ONLY when driver marks completed)
       if (r.status === "COMPLETED" || r.status === "Completed") {
         const notifKey = `${rId}_COMPLETED`;
         if (!dismissedKeys.has(notifKey) && !dismissedRideIds.has(rId)) {
           generatedNotifs.push({
             id: `${rId}_completed`,
             notificationId: `${rId}_completed`,
-            title: "✅ Ride Completed!",
-            subtitle: `Your ride ${rId} has been completed. Tap to view payment details.`,
+            title: "💳 Ride Completed - Pay Fare",
+            subtitle: `Your ride ${rId} has been completed. Tap to submit payment of ${fareText}.`,
             rideId: rId,
             requestId: rId,
             mongoId: r._id ? r._id.toString() : rId,
@@ -944,14 +1004,30 @@ exports.getCustomerNotifications = async (req, res) => {
       }
     }
 
-    // Merge stored and generated notifications, deduplicating by rideId + status
+    // Merge stored and generated notifications
     const allNotifs = [...storedNotifs, ...generatedNotifs];
+
+    // Find all rides that are completed so their old "Driver Accepted" notifications are retired
+    const completedRideIds = new Set();
+    for (const n of allNotifs) {
+      if (n.status === "COMPLETED" || n.status === "Completed") {
+        const rId = n.rideId || n.requestId || "";
+        if (rId) completedRideIds.add(rId);
+      }
+    }
+
     const seenKeys = new Set();
     const finalNotifications = [];
 
     for (const n of allNotifs) {
       const rId = n.rideId || n.requestId || n.id || "";
       const st = n.status || "";
+
+      // When ride is COMPLETED, only show the Payment notification (hide old ACCEPTED notification)
+      if ((st === "ACCEPTED" || st === "Accepted") && completedRideIds.has(rId)) {
+        continue;
+      }
+
       const key = `${rId}_${st}`;
 
       if (!seenKeys.has(key)) {
@@ -963,8 +1039,8 @@ exports.getCustomerNotifications = async (req, res) => {
           requestId: rId,
           rideId: rId,
           mongoId: n.mongoId || (n._id ? n._id.toString() : rId),
-          title: n.title || "Ride Notification",
-          subtitle: n.subtitle || "",
+          title: st === "COMPLETED" || st === "Completed" ? "💳 Ride Completed - Pay Fare" : (n.title || "Ride Notification"),
+          subtitle: st === "COMPLETED" || st === "Completed" ? `Your ride ${rId} is complete. Please tap to submit payment of ${n.fareFormatted || ""}.` : (n.subtitle || ""),
           status: st,
           fareFormatted: n.fareFormatted || "",
           pickup: n.pickup || n.pickupLocation || "Pickup Point",
@@ -1065,7 +1141,70 @@ exports.respondToFare = async (req, res) => {
         io.emit("admin-notification", adminNotification);
         io.emit("new-admin-notification", adminNotification);
         io.emit("ride-update", { type: "FARE_RESPONSE", ride: adminNotification });
-        console.log(`ðŸ“¡ Real-time event [customer-fare-response] emitted to Admin Console for Ride ${ride.requestId}: ${adminNotification.action}`);
+        console.log(`📡 Real-time event [customer-fare-response] emitted to Admin Console for Ride ${ride.requestId}: ${adminNotification.action}`);
+      }
+
+      // If customer accepted, also notify assigned Driver
+      if (isAccepted) {
+        const dDetails = ride.assignedDriverDetails || {};
+        const targetDriverId = ride.assignedDriverId || dDetails.driverId || null;
+        const targetDriverName = ride.assignedDriverName || dDetails.name || "Driver";
+        const targetDriverRef = dDetails.driverCode || ride.assignedDriverId || "";
+        const rId = ride.requestId || ride._id.toString();
+
+        const driverNotifData = {
+          driverId: targetDriverId,
+          driverReferenceId: targetDriverRef,
+          driverName: targetDriverName,
+          rideId: rId,
+          notificationId: `${rId}_FARE_ACCEPTED`,
+          title: "🎉 Customer Accepted Ride!",
+          subtitle: `Customer ${name} has accepted the ride request (${rId}) with fare ${fareFormatted}. Tap to view ride details.`,
+          customerName: name,
+          customerPhone: ride.passengerPhone || "",
+          pickup: ride.pickupLocation || "Pickup Point",
+          destination: ride.dropoffLocation || "Destination Point",
+          fareFormatted: fareFormatted,
+          status: "CUSTOMER_ACCEPTED",
+          type: "CUSTOMER_ACCEPTED",
+          isRead: false,
+          isDismissed: false,
+          payload: {
+            id: rId,
+            rideId: rId,
+            requestId: rId,
+            mongoId: ride._id ? ride._id.toString() : rId,
+            customerName: name,
+            passengerName: name,
+            passengerPhone: ride.passengerPhone,
+            pickupLocation: ride.pickupLocation,
+            dropoffLocation: ride.dropoffLocation,
+            fare: ride.fare,
+            fareFormatted: fareFormatted,
+            status: "CUSTOMER_ACCEPTED"
+          }
+        };
+
+        await DriverNotification.findOneAndUpdate(
+          { notificationId: `${rId}_FARE_ACCEPTED` },
+          driverNotifData,
+          { upsert: true, new: true }
+        ).catch(() => {});
+
+        if (io) {
+          if (targetDriverId) {
+            io.to(`driver_${targetDriverId}`).emit("customer-accepted-ride", driverNotifData);
+            io.to(String(targetDriverId)).emit("customer-accepted-ride", driverNotifData);
+            io.to(`driver_${targetDriverId}`).emit("driver-notification", driverNotifData);
+          }
+          if (targetDriverName) {
+            io.to(targetDriverName).emit("customer-accepted-ride", driverNotifData);
+            io.to(`driver_${targetDriverName}`).emit("customer-accepted-ride", driverNotifData);
+          }
+          io.emit("customer-accepted-ride", driverNotifData);
+          io.emit("driver-notification", driverNotifData);
+          console.log(`📡 Real-time event [customer-accepted-ride] emitted for driver for ride ${rId}`);
+        }
       }
     } catch (socketErr) {
       console.warn("Socket emit notice:", socketErr.message);
@@ -1591,21 +1730,122 @@ exports.setPreferredRoute = async (req, res) => {
 // 16. GET DRIVER NOTIFICATIONS
 exports.getDriverNotifications = async (req, res) => {
   try {
-    const { driverId } = req.query;
+    const { driverId, driverName } = req.query;
 
     let queryConds = [{ driverId: null }];
+    let driverMatchRides = [];
+
     if (driverId) {
       queryConds.push({ driverId: driverId });
       queryConds.push({ driverReferenceId: driverId });
+      driverMatchRides.push({ assignedDriverId: driverId });
+      driverMatchRides.push({ assignedDriverId: new RegExp(`^${driverId}$`, "i") });
+      driverMatchRides.push({ "assignedDriverDetails.driverId": driverId });
       if (mongoose.Types.ObjectId.isValid(driverId)) {
         queryConds.push({ driverId: new mongoose.Types.ObjectId(driverId) });
+        driverMatchRides.push({ assignedDriverId: new mongoose.Types.ObjectId(driverId) });
       }
     }
 
-    let notifications = await DriverNotification.find({ $or: queryConds })
+    if (driverName) {
+      queryConds.push({ driverName: new RegExp(`^${driverName.trim()}$`, "i") });
+      driverMatchRides.push({ assignedDriverName: new RegExp(`^${driverName.trim()}$`, "i") });
+      driverMatchRides.push({ "assignedDriverDetails.name": new RegExp(`^${driverName.trim()}$`, "i") });
+    }
+
+    // 1. Fetch persistent notifications from DriverNotification collection
+    let storedNotifications = await DriverNotification.find({
+      $or: queryConds,
+      isDismissed: { $ne: true }
+    })
       .sort({ createdAt: -1 })
       .lean()
       .catch(() => []);
+
+    // Also get dismissed keys
+    const dismissedNotifs = await DriverNotification.find({
+      $or: queryConds,
+      isDismissed: true
+    }).lean().catch(() => []);
+    const dismissedKeys = new Set(dismissedNotifs.map(d => d.notificationId || `${d.rideId}_${d.status}`));
+    const dismissedRideIds = new Set(dismissedNotifs.map(d => d.rideId).filter(Boolean));
+
+    // 2. Fetch active rides for driver from RideRequest and ScheduleRide where customer accepted or ride was assigned
+    let dynamicNotifs = [];
+    if (driverMatchRides.length > 0) {
+      const assignedRides = await RideRequest.find({ $or: driverMatchRides })
+        .sort({ updatedAt: -1 })
+        .lean()
+        .catch(() => []);
+
+      let scheduleRides = [];
+      try {
+        const ScheduleRide = require("../schema/ScheduleRide");
+        scheduleRides = await ScheduleRide.find({ $or: driverMatchRides })
+          .sort({ updatedAt: -1 })
+          .lean()
+          .catch(() => []);
+      } catch (_) {}
+
+      const allDriverRides = [...assignedRides, ...scheduleRides];
+
+      for (const r of allDriverRides) {
+        const rId = r.requestId || r._id.toString();
+        const fareText = r.fare ? `Rs. ${Number(r.fare).toLocaleString()}` : "Rs. 9,500";
+        const custName = r.passengerName || "Customer";
+        const st = (r.status || "").toLowerCase();
+
+        // Customer Accepted Ride
+        if (
+          r.customerAccepted === true ||
+          st.includes("customer accepted") ||
+          st.includes("fare accepted") ||
+          st === "accepted" ||
+          st === "confirmed"
+        ) {
+          const notifKey = `${rId}_CUSTOMER_ACCEPTED`;
+          if (!dismissedKeys.has(notifKey) && !dismissedRideIds.has(rId)) {
+            dynamicNotifs.push({
+              id: `${rId}_customer_accepted`,
+              notificationId: notifKey,
+              title: "🎉 Customer Accepted Ride!",
+              subtitle: `Customer ${custName} has accepted your ride request (${rId}). Tap to view ride details.`,
+              rideId: rId,
+              requestId: rId,
+              mongoId: r._id ? r._id.toString() : rId,
+              customerName: custName,
+              customerPhone: r.passengerPhone || "",
+              pickup: r.pickupLocation || "Pickup Point",
+              destination: r.dropoffLocation || "Destination Point",
+              fareFormatted: fareText,
+              status: "CUSTOMER_ACCEPTED",
+              type: "CUSTOMER_ACCEPTED",
+              isRead: false,
+              isDismissed: false,
+              createdAt: r.customerAcceptedAt || r.updatedAt || r.createdAt || new Date().toISOString()
+            });
+          }
+        }
+      }
+    }
+
+    // Merge stored and dynamic notifications, deduplicating by notificationId/rideId+type
+    const merged = [];
+    const seenMap = new Set();
+
+    for (const n of [...storedNotifications, ...dynamicNotifs]) {
+      const key = n.notificationId || (n.rideId ? `${n.rideId}_${n.type || n.status}` : String(n._id || n.id));
+      if (!seenMap.has(key) && !dismissedKeys.has(key)) {
+        seenMap.add(key);
+        merged.push({
+          ...n,
+          id: n.notificationId || n._id || n.id,
+          notificationId: key
+        });
+      }
+    }
+
+    let notifications = merged;
 
     if (!notifications || notifications.length === 0) {
       const seedNotifs = [
@@ -1733,3 +1973,214 @@ exports.clearAllCustomerNotifications = async (req, res) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 };
+
+// 20. DISMISS DRIVER NOTIFICATION
+exports.dismissDriverNotification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { driverId } = req.body || {};
+
+    if (id) {
+      if (id.match(/^[0-9a-fA-F]{24}$/)) {
+        await DriverNotification.findByIdAndUpdate(id, { isDismissed: true, isRead: true }).catch(() => {});
+      }
+      await DriverNotification.updateMany(
+        { $or: [{ notificationId: id }, { rideId: id }] },
+        { isDismissed: true, isRead: true }
+      ).catch(() => {});
+
+      const cleanRideId = id.replace(/_customer_accepted|_accepted|_fare_accepted|_price_updated/i, "");
+      await DriverNotification.findOneAndUpdate(
+        { notificationId: id },
+        {
+          notificationId: id,
+          rideId: cleanRideId,
+          status: "DISMISSED",
+          title: "Dismissed Notification",
+          subtitle: "",
+          isDismissed: true,
+          isRead: true,
+          ...(driverId ? { driverId } : {})
+        },
+        { upsert: true }
+      ).catch(() => {});
+    }
+
+    return res.status(200).json({ success: true, message: "Driver notification dismissed" });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// 21. CLEAR ALL DRIVER NOTIFICATIONS
+exports.clearAllDriverNotifications = async (req, res) => {
+  try {
+    const { driverId } = req.body || {};
+    let queryConds = [{ driverId: null }];
+    if (driverId) {
+      queryConds.push({ driverId });
+      queryConds.push({ driverReferenceId: driverId });
+    }
+    const query = { $or: queryConds };
+    await DriverNotification.updateMany(query, { isDismissed: true, isRead: true }).catch(() => {});
+
+    return res.status(200).json({ success: true, message: "All driver notifications cleared" });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// 22. ACCEPT RIDE BY CUSTOMER (Real-time Notification Dispatched to Driver)
+exports.acceptRideByCustomer = async (req, res) => {
+  try {
+    const rideId = req.params.id || req.body.rideId;
+    const { customerId, customerName, customerPhone } = req.body || {};
+
+    if (!rideId) {
+      return res.status(400).json({
+        success: false,
+        message: "Ride ID is required."
+      });
+    }
+
+    let ride = null;
+    if (mongoose.Types.ObjectId.isValid(rideId)) {
+      ride = await RideRequest.findById(rideId).catch(() => null);
+    }
+    if (!ride) {
+      ride = await RideRequest.findOne({ requestId: rideId }).catch(() => null);
+    }
+    if (!ride) {
+      try {
+        const ScheduleRide = require("../schema/ScheduleRide");
+        ride = await ScheduleRide.findOne({
+          $or: [
+            { requestId: rideId },
+            ...(mongoose.Types.ObjectId.isValid(rideId) ? [{ _id: rideId }] : [])
+          ]
+        }).catch(() => null);
+      } catch (_) {}
+    }
+
+    if (!ride) {
+      return res.status(404).json({
+        success: false,
+        message: `Ride ${rideId} not found.`
+      });
+    }
+
+    const resolvedCustName = customerName || ride.passengerName || "Customer";
+    const resolvedCustPhone = customerPhone || ride.passengerPhone || "";
+    const resolvedRideId = ride.requestId || ride._id.toString();
+    const fareFormatted = ride.fare ? `Rs. ${Number(ride.fare).toLocaleString()}` : "Rs. 9,500";
+
+    ride.customerAccepted = true;
+    ride.customerAcceptedAt = new Date();
+    ride.status = "Customer Accepted";
+    await ride.save();
+
+    // Prepare driver target
+    const dDetails = ride.assignedDriverDetails || {};
+    const targetDriverId = ride.assignedDriverId || dDetails.driverId || null;
+    const targetDriverRef = dDetails.driverCode || ride.assignedDriverId || "";
+    const targetDriverName = ride.assignedDriverName || dDetails.name || "Driver";
+
+    // 1. Create persistent DriverNotification
+    const notifId = `${resolvedRideId}_CUSTOMER_ACCEPTED`;
+    const driverNotifData = {
+      driverId: targetDriverId,
+      driverReferenceId: targetDriverRef,
+      driverName: targetDriverName,
+      rideId: resolvedRideId,
+      notificationId: notifId,
+      title: "🎉 Customer Accepted Ride!",
+      subtitle: `Customer ${resolvedCustName} has accepted your ride request (${resolvedRideId}). Tap to view ride details.`,
+      customerName: resolvedCustName,
+      customerPhone: resolvedCustPhone,
+      pickup: ride.pickupLocation || "Pickup Point",
+      destination: ride.dropoffLocation || "Destination Point",
+      fareFormatted: fareFormatted,
+      status: "CUSTOMER_ACCEPTED",
+      type: "CUSTOMER_ACCEPTED",
+      isRead: false,
+      isDismissed: false,
+      payload: {
+        id: resolvedRideId,
+        rideId: resolvedRideId,
+        requestId: resolvedRideId,
+        mongoId: ride._id ? ride._id.toString() : resolvedRideId,
+        passengerName: resolvedCustName,
+        customerName: resolvedCustName,
+        passengerPhone: resolvedCustPhone,
+        pickupLocation: ride.pickupLocation,
+        dropoffLocation: ride.dropoffLocation,
+        fare: ride.fare,
+        fareFormatted: fareFormatted,
+        status: "CUSTOMER_ACCEPTED",
+        startingFrom: ride.startingFrom,
+        timeToReach: ride.timeToReach
+      }
+    };
+
+    let savedDriverNotif;
+    try {
+      savedDriverNotif = await DriverNotification.findOneAndUpdate(
+        { notificationId: notifId },
+        driverNotifData,
+        { upsert: true, new: true }
+      );
+    } catch (dErr) {
+      console.warn("DriverNotification save notice:", dErr.message);
+      savedDriverNotif = driverNotifData;
+    }
+
+    // 2. Also update CustomerNotification so customer sees confirmed status
+    try {
+      await CustomerNotification.findOneAndUpdate(
+        { notificationId: `${resolvedRideId}_ACCEPTED` },
+        {
+          subtitle: `You accepted this ride with Driver ${targetDriverName}.`,
+          status: "CUSTOMER_ACCEPTED"
+        }
+      ).catch(() => {});
+    } catch (_) {}
+
+    // 3. Emit real-time Socket.IO events to Driver and System
+    try {
+      const io = req.app.get("io");
+      if (io) {
+        if (targetDriverId) {
+          io.to(`driver_${targetDriverId}`).emit("customer-accepted-ride", driverNotifData);
+          io.to(String(targetDriverId)).emit("customer-accepted-ride", driverNotifData);
+          io.to(`driver_${targetDriverId}`).emit("driver-notification", driverNotifData);
+        }
+        if (targetDriverName) {
+          io.to(targetDriverName).emit("customer-accepted-ride", driverNotifData);
+          io.to(`driver_${targetDriverName}`).emit("customer-accepted-ride", driverNotifData);
+        }
+        io.emit("customer-accepted-ride", driverNotifData);
+        io.emit("driver-notification", driverNotifData);
+        io.emit("ride-updated", { type: "CUSTOMER_ACCEPTED", ride: driverNotifData.payload });
+        io.emit("ride_accepted", driverNotifData);
+        console.log(`📡 Real-time event [customer-accepted-ride] emitted for driver ${targetDriverName} (${resolvedRideId})`);
+      }
+    } catch (socketErr) {
+      console.warn("Socket emit error:", socketErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Ride ${resolvedRideId} accepted successfully! Driver has been notified.`,
+      ride,
+      notification: savedDriverNotif
+    });
+  } catch (err) {
+    console.error("Accept Ride By Customer Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to accept ride",
+      error: err.message
+    });
+  }
+};
+

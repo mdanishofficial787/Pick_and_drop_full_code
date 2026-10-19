@@ -83,7 +83,7 @@ class _AccountTypeScreenState extends State<AccountTypeScreen> {
                       _AccountTypeCard(
                         title: 'Customer',
                         description:
-                            'Book rides, pick & drop services, and track in\nreal-time.',
+                            'Book rides,pick & drop services,and track in real-time.',
                         icon: Icons.groups_outlined,
                         selected: _selected == AccountType.customer,
                         onTap: () {

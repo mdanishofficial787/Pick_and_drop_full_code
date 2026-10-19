@@ -31,12 +31,24 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   String? currentProfilePic;
   String currentDriverName = "";
 
+  // Becomes true after a successful edit so the previous screen can refresh too
+  bool _profileChanged = false;
+
   @override
   void initState() {
     super.initState();
     currentProfilePic = widget.profilePic;
     currentDriverName = widget.driverName;
     _fetchProfile();
+  }
+
+  // The backend stores the photo as { url, public_id } under "driverPhoto"
+    // The backend stores the photo as { url, public_id } under "driverPhoto"
+  String? _extractPhotoUrl(dynamic d) {
+    final p = d['driverPhoto'] ?? d['profilePic'] ?? d['profilePicture'];
+    if (p is Map) return p['url']?.toString();
+    final s = p?.toString();
+    return (s != null && s.isNotEmpty) ? s : null;
   }
 
   Future<void> _fetchProfile() async {
@@ -46,17 +58,52 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
         Uri.parse('$kBaseUrl/driver/${widget.driverId}'),
         headers: widget.token != null ? {'Authorization': 'Bearer ${widget.token}'} : {},
       );
+
+      debugPrint('Dashboard GET driver profile ${res.statusCode}');
+
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final d = data['driver'] ?? data['data'] ?? data;
         if (mounted) {
           setState(() {
-            currentDriverName = d['fullName']?.toString() ?? d['name']?.toString() ?? currentDriverName;
-            currentProfilePic = d['profilePic']?.toString() ?? d['profilePicture']?.toString() ?? currentProfilePic;
+            // Backend field is "Name" (capital N)
+            currentDriverName = d['Name']?.toString() ??
+                d['fullName']?.toString() ??
+                d['name']?.toString() ??
+                currentDriverName;
+            currentProfilePic = _extractPhotoUrl(d) ?? currentProfilePic;
           });
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Dashboard fetch profile error: $e');
+    }
+  }
+
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: Colors.red),
+    );
+  }
+
+  Future<void> _openEditProfile() async {
+    final updated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => EditProfileScreen(
+          driverName: currentDriverName,
+          profilePic: currentProfilePic,
+          driverId: widget.driverId,
+          token: widget.token,
+        ),
+      ),
+    );
+
+    // Reload the latest name and photo after a successful save
+    if (updated == true) {
+      _profileChanged = true;
+      await _fetchProfile();
+    }
   }
 
   @override
@@ -68,7 +115,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Color(0xFF111827)),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () => Navigator.pop(context, _profileChanged),
         ),
         centerTitle: true,
         title: Text(
@@ -143,11 +190,33 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
               ),
               child: Column(
                 children: [
-                  _buildMenuItem(context, icon: Icons.person_outline_rounded, iconBgColor: const Color(0xFFEFF6FF), iconColor: const Color(0xFF1959F6), title: 'Edit Profile', onTap: () {
-                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => EditProfileScreen(driverName: currentDriverName, profilePic: currentProfilePic, driverId: widget.driverId, token: widget.token)));
-                  }, showDivider: true),
-                  _buildMenuItem(context, icon: Icons.access_time_rounded, iconBgColor: const Color(0xFFEFF6FF), iconColor: const Color(0xFF1959F6), title: 'Ride History', onTap: () {}, showDivider: true),
-                  _buildMenuItem(context, icon: Icons.logout_rounded, iconBgColor: const Color(0xFFFEE2E2), iconColor: const Color(0xFFDC2626), title: 'Log Out', onTap: () => _confirmLogout(context), showDivider: false),
+                  _buildMenuItem(
+                    context,
+                    icon: Icons.person_outline_rounded,
+                    iconBgColor: const Color(0xFFEFF6FF),
+                    iconColor: const Color(0xFF1959F6),
+                    title: 'Edit Profile',
+                    onTap: _openEditProfile,
+                    showDivider: true,
+                  ),
+                  _buildMenuItem(
+                    context,
+                    icon: Icons.access_time_rounded,
+                    iconBgColor: const Color(0xFFEFF6FF),
+                    iconColor: const Color(0xFF1959F6),
+                    title: 'Ride History',
+                    onTap: () {},
+                    showDivider: true,
+                  ),
+                  _buildMenuItem(
+                    context,
+                    icon: Icons.logout_rounded,
+                    iconBgColor: const Color(0xFFFEE2E2),
+                    iconColor: const Color(0xFFDC2626),
+                    title: 'Log Out',
+                    onTap: () => _confirmLogout(context),
+                    showDivider: false,
+                  ),
                 ],
               ),
             ),
@@ -159,7 +228,14 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
 
   Widget _buildProfileImage() {
     if (currentProfilePic != null && currentProfilePic!.isNotEmpty) {
-      return Image.network(currentProfilePic!, fit: BoxFit.cover, width: 100, height: 100, errorBuilder: (_, __, ___) => _defaultAvatar());
+      return Image.network(
+        currentProfilePic!,
+        key: ValueKey(currentProfilePic), // redraws when the photo changes
+        fit: BoxFit.cover,
+        width: 100,
+        height: 100,
+        errorBuilder: (_, __, ___) => _defaultAvatar(),
+      );
     }
     return _defaultAvatar();
   }
@@ -199,8 +275,8 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: GoogleFonts.inter(color: Colors.grey.shade600))),
           ElevatedButton(
-            onPressed: () { 
-              Navigator.pop(ctx); 
+            onPressed: () {
+              Navigator.pop(ctx);
               if (widget.onLogout != null) {
                 widget.onLogout!();
               } else {

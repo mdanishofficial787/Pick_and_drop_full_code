@@ -41,12 +41,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String? _editingField;
   XFile? _newProfilePic;
 
+  // Photo currently saved on the server (shown until a new one is picked)
+  String? _photoUrl;
+
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.driverName);
     _emailController = TextEditingController(text: widget.email ?? '');
     _phoneController = TextEditingController(text: widget.phone ?? '');
+    _photoUrl = widget.profilePic;
     _fetchDriverDetails();
   }
 
@@ -56,6 +60,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _emailController.dispose();
     _phoneController.dispose();
     super.dispose();
+  }
+
+  // The backend stores the photo as { url, public_id } under "driverPhoto"
+  String? _extractPhotoUrl(dynamic d) {
+    final p = d['driverPhoto'] ?? d['profilePic'] ?? d['profilePicture'];
+    if (p is Map) return p['url']?.toString();
+    final s = p?.toString();
+    return (s != null && s.isNotEmpty) ? s : null;
   }
 
   Future<void> _fetchDriverDetails() async {
@@ -70,99 +82,133 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         Uri.parse('$kBaseUrl/driver/${widget.driverId}'),
         headers: headers,
       );
-      if (res.statusCode == 200) {
+
+      debugPrint('GET driver details ${res.statusCode}');
+
+      if (res.statusCode == 401) {
+        _showSnack('Session expired. Please log out and log in again.', isError: true);
+      } else if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final driverData = data['driver'] ?? data['data'] ?? data;
-        final email = driverData['email']?.toString() ?? driverData['Email']?.toString() ?? '';
-        final phone = driverData['phoneNumber']?.toString() ?? driverData['phone']?.toString() ?? driverData['Phone']?.toString() ?? '';
+
+        // Backend field names are "Name", "Email", "PhoneNumber" (capitalised)
+        final name = driverData['Name']?.toString() ?? driverData['fullName']?.toString() ?? '';
+        final email = driverData['Email']?.toString() ?? driverData['email']?.toString() ?? '';
+        final phone = driverData['PhoneNumber']?.toString() ??
+            driverData['phoneNumber']?.toString() ??
+            driverData['phone']?.toString() ??
+            driverData['Phone']?.toString() ??
+            '';
+        final photo = _extractPhotoUrl(driverData);
+
         setState(() {
+          if (name.isNotEmpty) _nameController.text = name;
           if (email.isNotEmpty) _emailController.text = email;
           if (phone.isNotEmpty) _phoneController.text = phone;
+          if (photo != null) _photoUrl = photo;
         });
       }
-    } catch (_) {}
-    setState(() => _isLoading = false);
+    } catch (e) {
+      debugPrint('Fetch driver details error: $e');
+    }
+    if (mounted) setState(() => _isLoading = false);
   }
 
   Future<void> _saveChanges() async {
-  if (widget.driverId == null) {
-    _showSnack('Driver ID not found', isError: true);
-    return;
-  }
-  if (widget.token == null) {
-    _showSnack('Authentication error: Token is missing. Please log in again.', isError: true);
-    return;
-  }
-  setState(() => _isSaving = true);
-  try {
-    final headers = {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ${widget.token}',
-    };
-    http.Response res;
-    if (_newProfilePic != null) {
-      final request = http.MultipartRequest('PATCH', Uri.parse('$kBaseUrl/driver/${widget.driverId}'));
-      request.headers.addAll({'Authorization': 'Bearer ${widget.token}'});
-      final nameVal = _nameController.text.trim();
-      final emailVal = _emailController.text.trim();
-      final phoneVal = _phoneController.text.trim();
-      
-      if (nameVal.isNotEmpty) request.fields['Name'] = nameVal;
-      if (emailVal.isNotEmpty) request.fields['Email'] = emailVal;
-      if (phoneVal.isNotEmpty) request.fields['PhoneNumber'] = phoneVal;
-
-      final bytes = await _newProfilePic!.readAsBytes();
-      String name = _newProfilePic!.name.isNotEmpty ? _newProfilePic!.name : 'profilePic.jpg';
-      final ext = name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
-
-      request.files.add(http.MultipartFile.fromBytes(
-        'driverPhoto',
-        bytes,
-        filename: name,
-        contentType: MediaType('image', ext),
-      ));
-
-      final streamedResponse = await request.send();
-      res = await http.Response.fromStream(streamedResponse);
-    } else {
-      final Map<String, dynamic> bodyData = {};
-      final nameVal = _nameController.text.trim();
-      final emailVal = _emailController.text.trim();
-      final phoneVal = _phoneController.text.trim();
-      
-      if (nameVal.isNotEmpty) bodyData['Name'] = nameVal;
-      if (emailVal.isNotEmpty) bodyData['Email'] = emailVal;
-      if (phoneVal.isNotEmpty) bodyData['PhoneNumber'] = phoneVal;
-
-      res = await http.patch(
-        Uri.parse('$kBaseUrl/driver/${widget.driverId}'),
-        headers: headers,
-        body: jsonEncode(bodyData),
-      );
+    if (widget.driverId == null) {
+      _showSnack('Driver ID not found', isError: true);
+      return;
+    }
+    if (widget.token == null || widget.token!.isEmpty) {
+      _showSnack('Authentication error: Token is missing. Please log in again.', isError: true);
+      return;
     }
 
-    debugPrint('PATCH ${res.statusCode}: ${res.body}'); // <-- see exactly what the server says
+    final nameVal = _nameController.text.trim();
+    final emailVal = _emailController.text.trim();
+    final phoneVal = _phoneController.text.trim();
 
-    if (res.statusCode == 200) {
-      _showSnack('Profile updated successfully!');
-      if (mounted) Navigator.pop(context, true);
-    } else {
+    if (nameVal.isEmpty) {
+      _showSnack('Please enter your name', isError: true);
+      return;
+    }
+    if (emailVal.isNotEmpty && !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(emailVal)) {
+      _showSnack('Please enter a valid email address', isError: true);
+      return;
+    }
+
+    setState(() => _isSaving = true);
+
+    try {
+      final headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ${widget.token}',
+      };
+
+      http.Response res;
+
+      if (_newProfilePic != null) {
+        final request = http.MultipartRequest('PATCH', Uri.parse('$kBaseUrl/driver/${widget.driverId}'));
+        request.headers.addAll({'Authorization': 'Bearer ${widget.token}'});
+
+        request.fields['Name'] = nameVal;
+        if (emailVal.isNotEmpty) request.fields['Email'] = emailVal;
+        if (phoneVal.isNotEmpty) request.fields['PhoneNumber'] = phoneVal;
+
+        final bytes = await _newProfilePic!.readAsBytes();
+        final String name = _newProfilePic!.name.isNotEmpty ? _newProfilePic!.name : 'profilePic.jpg';
+        final ext = name.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+
+        request.files.add(http.MultipartFile.fromBytes(
+          'driverPhoto',
+          bytes,
+          filename: name,
+          contentType: MediaType('image', ext),
+        ));
+
+        final streamedResponse = await request.send();
+        res = await http.Response.fromStream(streamedResponse);
+      } else {
+        final Map<String, dynamic> bodyData = {'Name': nameVal};
+        if (emailVal.isNotEmpty) bodyData['Email'] = emailVal;
+        if (phoneVal.isNotEmpty) bodyData['PhoneNumber'] = phoneVal;
+
+        res = await http.patch(
+          Uri.parse('$kBaseUrl/driver/${widget.driverId}'),
+          headers: headers,
+          body: jsonEncode(bodyData),
+        );
+      }
+
+      debugPrint('PATCH ${res.statusCode}: ${res.body}');
+
+      if (res.statusCode == 200) {
+        _showSnack('Profile updated successfully!');
+        if (mounted) Navigator.pop(context, true);
+        return;
+      }
+
+      if (res.statusCode == 401) {
+        _showSnack('Session expired. Please log out and log in again.', isError: true);
+        return;
+      }
+
       String errorMsg = 'Failed to update profile (${res.statusCode})';
       try {
         final body = jsonDecode(res.body);
         errorMsg = body['message']?.toString() ?? errorMsg;
       } catch (_) {
-        // body wasn't JSON — keep the generic message but log the raw body
         debugPrint('Non-JSON error body: ${res.body}');
       }
       _showSnack(errorMsg, isError: true);
+    } catch (e) {
+      _showSnack('Error: $e', isError: true);
+      debugPrint('SAVE EXCEPTION: $e');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
-  } catch (e) {
-    _showSnack('Error: $e', isError: true);
-    debugPrint('SAVE EXCEPTION: $e');
   }
-  if (mounted) setState(() => _isSaving = false);
-}
+
   Future<void> _pickImage(ImageSource source) async {
     final XFile? file = await ImagePicker().pickImage(
       source: source,
@@ -346,7 +392,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         elevation: 0,
                       ),
                       child: _isSaving
-                          ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            )
                           : Text('Save Changes', style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
                     ),
                   ),
@@ -373,8 +423,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         },
       );
     }
-    if (widget.profilePic != null && widget.profilePic!.isNotEmpty) {
-      return Image.network(widget.profilePic!, fit: BoxFit.cover, width: 90, height: 90, errorBuilder: (_, __, ___) => _defaultAvatar());
+    if (_photoUrl != null && _photoUrl!.isNotEmpty) {
+      return Image.network(_photoUrl!, fit: BoxFit.cover, width: 90, height: 90, errorBuilder: (_, __, ___) => _defaultAvatar());
     }
     return _defaultAvatar();
   }
