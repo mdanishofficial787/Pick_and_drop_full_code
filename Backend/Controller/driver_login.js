@@ -1,4 +1,4 @@
-﻿const bcrypt = require("bcryptjs");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Driver = require("../schema/Driver");
 
@@ -11,33 +11,43 @@ const loginDriver = async (req, res) => {
         } = req.body;
 
         if (
-            !CountryCode ||
             !PhoneNumber ||
             !Password
         ) {
             return res.status(400).json({
                 success: false,
                 message:
-                    "Country code, phone number and password are required",
+                    "Phone number and password are required",
             });
         }
 
-        const cleanCountryCode = CountryCode.trim();
-        let cleanPhoneNumber = PhoneNumber.toString().trim();
+        const cleanCountryCode = (CountryCode || "+92").toString().trim();
+        const rawPhone = (PhoneNumber || "").toString().trim();
 
-        if (cleanPhoneNumber.startsWith(cleanCountryCode)) {
-            cleanPhoneNumber = cleanPhoneNumber
-                .slice(cleanCountryCode.length)
-                .trim();
-        }
-
-        if (cleanPhoneNumber.startsWith("0")) {
-            cleanPhoneNumber = cleanPhoneNumber.substring(1);
-        }
+        // Flexible phone matching - support with/without 0, with/without country code, and email
+        const digitsOnly = rawPhone.replace(/\D/g, "");
+        const core = digitsOnly.replace(/^92/, "").replace(/^0/, "");
+        const phoneVariants = Array.from(new Set([
+            rawPhone,
+            digitsOnly,
+            core,
+            "0" + core,
+            "+92" + core,
+            "92" + core,
+            cleanCountryCode + core
+        ])).filter(Boolean);
+        const escapedRaw = rawPhone.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
         const driver = await Driver.findOne({
-            CountryCode: cleanCountryCode,
-            PhoneNumber: cleanPhoneNumber,
+            $or: [
+                { PhoneNumber: { $in: phoneVariants } },
+                {
+                    CountryCode: { $in: ["+92", "92", cleanCountryCode] },
+                    PhoneNumber: { $in: phoneVariants }
+                },
+                { Email: rawPhone.toLowerCase() },
+                { Email: { $regex: new RegExp('^' + escapedRaw + '$', 'i') } }
+            ]
         });
 
         if (!driver) {
@@ -47,10 +57,13 @@ const loginDriver = async (req, res) => {
             });
         }
 
-        const isPasswordValid = await bcrypt.compare(
+        let isPasswordValid = await bcrypt.compare(
             Password,
             driver.Password
         );
+        if (!isPasswordValid && typeof Password === "string" && Password.trim() !== Password) {
+            isPasswordValid = await bcrypt.compare(Password.trim(), driver.Password);
+        }
 
         if (!isPasswordValid) {
             return res.status(401).json({

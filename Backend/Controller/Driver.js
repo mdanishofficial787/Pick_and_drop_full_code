@@ -1,4 +1,4 @@
-﻿const Driver = require("../schema/Driver");
+const Driver = require("../schema/Driver");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const cloudinary = require("../config/cloudinary");
@@ -60,6 +60,15 @@ const registerDriver = async (req, res) => {
       });
     }
 
+    const cleanPhone = (PhoneNumber || "").toString().replace(/[\s\-()]/g, '');
+    const pakPhoneRegex = /^((\+92|92)?(0)?3[0-9]{9})$/;
+    if (!pakPhoneRegex.test(cleanPhone)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid Pakistani phone number (e.g. 03328904416)",
+      });
+    }
+
     const files = req.files || {};
     const requiredImages = [
       "driverPhoto",
@@ -98,11 +107,13 @@ const registerDriver = async (req, res) => {
 
     const cleanEmail = Email.toLowerCase().trim();
 
+    const coreReg = finalPhoneNumber.replace(/\D/g, "").replace(/^92/, "").replace(/^0/, "");
+    const regVariants = [finalPhoneNumber, coreReg, "0" + coreReg, "+92" + coreReg, "92" + coreReg];
+
     const existingDriver = await Driver.findOne({
       $or: [
         {
-          PhoneNumber: finalPhoneNumber,
-          CountryCode: finalCountryCode,
+          PhoneNumber: { $in: regVariants },
         },
         {
           Email: cleanEmail,
@@ -270,22 +281,44 @@ const updateDriver = async (req, res) => {
       delete updates.availability;
     }
 
-    if (updates.PhoneNumber) {
-      const rawInput =
-        updates.CountryCode && !updates.PhoneNumber.startsWith("+")
-          ? `${updates.CountryCode}${updates.PhoneNumber}`
-          : updates.PhoneNumber;
-
-      const parsedPhone = parseGlobalPhoneNumber(
-        rawInput,
-        updates.CountryIso || "PK"
-      );
-
-      if (parsedPhone && parsedPhone.isValid) {
-        updates.CountryCode = parsedPhone.countryCode;
-        updates.PhoneNumber = parsedPhone.formattedLocal;
-        updates.CountryIso = parsedPhone.countryIso;
+    const phoneInput = updates.PhoneNumber || updates.phoneNumber || updates.phone;
+    if (phoneInput !== undefined && phoneInput !== null && phoneInput.toString().trim().length > 0) {
+      const cleanPhone = phoneInput.toString().replace(/[\s\-()]/g, "");
+      const pakPhoneRegex = /^((\+92|92)?(0)?3[0-9]{9})$/;
+      if (!pakPhoneRegex.test(cleanPhone)) {
+        return res.status(400).json({
+          success: false,
+          message: "Please enter a valid Pakistani phone number (e.g. 03328904416)",
+        });
       }
+
+      let formattedPhone = cleanPhone;
+      if (formattedPhone.startsWith("+92")) {
+        formattedPhone = "0" + formattedPhone.slice(3);
+      } else if (formattedPhone.startsWith("92") && formattedPhone.length === 12) {
+        formattedPhone = "0" + formattedPhone.slice(2);
+      } else if (formattedPhone.startsWith("3")) {
+        formattedPhone = "0" + formattedPhone;
+      }
+
+      const coreDigits = formattedPhone.replace(/\D/g, "").replace(/^92/, "").replace(/^0/, "");
+      const checkVariants = [formattedPhone, coreDigits, "0" + coreDigits, "+92" + coreDigits, "92" + coreDigits];
+      const existingDriver = await Driver.findOne({
+        PhoneNumber: { $in: checkVariants },
+        _id: { $ne: req.params.id },
+      });
+      if (existingDriver) {
+        return res.status(400).json({
+          success: false,
+          message: "Phone number is already registered with another account",
+        });
+      }
+
+      updates.PhoneNumber = formattedPhone;
+      updates.CountryCode = "+92";
+      updates.CountryIso = "PK";
+      delete updates.phoneNumber;
+      delete updates.phone;
     }
 
     const files = req.files || {};

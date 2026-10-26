@@ -6,10 +6,10 @@ class ApiConstants {
       'https://pick-and-drop-full-code-workfromh144-7533s-projects.vercel.app';
 
   // Set this to true to use live Vercel backend, or false for local PC network
-  static const bool useLiveBackend = true;
+  static const bool useLiveBackend = false;
 
   // Your PC's Local Network IP (allows physical mobile connected via USB / Wi-Fi to reach Backend)
-  static const String serverIp = '192.168.88.81';
+  static const String serverIp = '192.168.88.87';
   static const String serverPort = '3000';
 
   // Optional manual override if needed

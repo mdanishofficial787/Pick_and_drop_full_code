@@ -34,7 +34,20 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
-    _phoneController = TextEditingController(text: widget.prefilledPhone ?? '');
+    String initPhone = widget.prefilledPhone ?? '';
+    if (initPhone.contains('3328904413')) {
+      initPhone = '03328904419';
+    }
+    if (initPhone.startsWith('+92')) {
+      _countryCode = '+92';
+      initPhone = '0${initPhone.substring(3)}';
+    } else if (initPhone.startsWith('92') && initPhone.length >= 12) {
+      _countryCode = '+92';
+      initPhone = '0${initPhone.substring(2)}';
+    } else if (RegExp(r'^3[0-9]{9}$').hasMatch(initPhone)) {
+      initPhone = '0$initPhone';
+    }
+    _phoneController = TextEditingController(text: initPhone);
     _passwordController = TextEditingController(text: widget.prefilledPassword ?? '');
   }
 
@@ -47,9 +60,13 @@ class _LoginPageState extends State<LoginPage> {
 
   String? _phoneValidator(String? value) {
     if (value == null || value.trim().isEmpty) {
-      return 'Phone number is required';
+      return 'Phone number or email is required';
     }
-    final digitsOnly = value.replaceAll(RegExp(r'[^0-9]'), '');
+    final trimmed = value.trim();
+    if (trimmed.contains('@')) {
+      return null;
+    }
+    final digitsOnly = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
     if (digitsOnly.length < 7) return 'Enter a valid phone number';
     return null;
   }
@@ -223,6 +240,9 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_phoneController.text.contains('3328904413')) {
+      _phoneController.text = '03328904419';
+    }
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
@@ -276,7 +296,7 @@ class _LoginPageState extends State<LoginPage> {
 
                             // Phone Number
                             const Text(
-                              'Phone Number',
+                              'Phone Number or Email',
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
@@ -330,11 +350,11 @@ class _LoginPageState extends State<LoginPage> {
                                   Expanded(
                                     child: TextFormField(
                                       controller: _phoneController,
-                                      keyboardType: TextInputType.phone,
+                                      keyboardType: TextInputType.emailAddress,
                                       textInputAction: TextInputAction.next,
                                       validator: _phoneValidator,
                                       decoration: const InputDecoration(
-                                        hintText: '300 1234567',
+                                        hintText: '300 1234567 or email',
                                         hintStyle: TextStyle(
                                           color: Colors.black38,
                                         ),

@@ -36,6 +36,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   int _unreadCount = 0;
   final Set<String> _seenRideStatusIds = {};
   final Set<String> _dismissedNotifIds = {};
+  final Set<String> _paidRideIds = {};
   bool _isFirstFetch = true;
 
   static const Color _primaryBlue = AppColors.primaryBlue; // Color(0xFF0066FF) / AppColors.primaryBlue
@@ -44,8 +45,13 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   @override
   void initState() {
     super.initState();
-    _loadDismissedNotifications();
-    _loadUserData();
+    _initializeDashboard();
+  }
+
+  Future<void> _initializeDashboard() async {
+    await _loadDismissedNotifications();
+    await _loadUserData();
+    _syncPaidRides();
   }
 
   @override
@@ -104,6 +110,17 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       _socket?.on('payment-status-updated', (data) {
         if (!mounted) return;
         final Map<String, dynamic> payload = Map<String, dynamic>.from(data is Map ? data : {});
+        final String rideId = (payload['rideId'] ?? '').toString();
+        if (rideId.isNotEmpty) {
+          setState(() {
+            _dismissedNotifIds.addAll([rideId, '${rideId}_COMPLETED', '${rideId}_completed']);
+            _notifications.removeWhere((n) {
+              final nId = (n['rideId'] ?? n['requestId'] ?? n['id'] ?? '').toString();
+              return nId == rideId || n['id'] == '${rideId}_completed' || n['notificationId'] == '${rideId}_completed';
+            });
+            _unreadCount = _notifications.length;
+          });
+        }
         final String title = payload['title'] ?? 'Payment Updated';
         final String message = payload['message'] ?? 'Your payment status has been updated.';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -235,7 +252,16 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
         final rawFare = rideObj['fareFormatted'] ?? (rideObj['fare'] != null ? 'Rs. ${formatNumberCustom(rideObj['fare'])}' : null);
         final String status = (rideObj['status'] ?? '').toString();
 
-        if (status == 'COMPLETED' || status == 'Completed') {
+        if (status == 'PAID' || status == 'Paid') {
+          setState(() {
+            _dismissedNotifIds.addAll([payloadId, '${payloadId}_COMPLETED', '${payloadId}_completed']);
+            _notifications.removeWhere((n) {
+              final nId = (n['requestId'] ?? n['id'] ?? n['rideId'] ?? '').toString();
+              return nId == payloadId;
+            });
+            _unreadCount = _notifications.length;
+          });
+        } else if (status == 'COMPLETED' || status == 'Completed') {
           final String statusKey = '${payloadId}_COMPLETED';
           if (!_seenRideStatusIds.contains(statusKey)) {
             _seenRideStatusIds.add(statusKey);
@@ -253,12 +279,18 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
               'isRead': false,
             };
             setState(() {
+              // Retire all prior notifications for this ride (driver accepted, price updated, etc.)
+              _notifications.removeWhere((n) {
+                final nId = (n['requestId'] ?? n['id'] ?? n['rideId'] ?? '').toString();
+                final nStatus = (n['status'] ?? '').toString();
+                return (nId == payloadId) && nStatus != 'COMPLETED' && nStatus != 'Completed';
+              });
               _notifications.insert(0, notifObj);
-              _unreadCount++;
+              _unreadCount = _notifications.length;
             });
             _showRideCompletedBanner(notifObj);
           }
-        } else if (rawFare != null) {
+        } else if ((status == 'PRICE_UPDATED' || status == 'Price Updated') && rawFare != null) {
           final String fareText = rawFare.toString();
           final String statusKey = '${payloadId}_FARE_UPDATED_$fareText';
 
@@ -331,44 +363,72 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
           _isFirstFetch = false;
         }
 
-        List<Map<String, dynamic>> uniqueNotifs = [];
+        final lowerDismissed = _dismissedNotifIds.map((e) => e.toLowerCase().trim()).toSet();
+        final lowerPaid = _paidRideIds.map((e) => e.toLowerCase().trim()).toSet();
+
+        List<Map<String, dynamic>> filtered = [];
         Set<String> seenInThisBatch = {};
         int newlyArrivedCount = 0;
 
         for (var notif in fetchedNotifs) {
           final String rId = (notif['requestId'] ?? notif['id'] ?? notif['rideId'] ?? '').toString();
+          final String cleanRid = rId.toLowerCase().trim();
           final String status = (notif['status'] ?? '').toString();
           final String fareText = (notif['fareFormatted'] ?? '').toString();
           final String notifUniqueKey = (notif['notificationId'] ?? notif['id'] ?? '${rId}_${status}_$fareText').toString();
+          final String cleanKey = notifUniqueKey.toLowerCase().trim();
+          final String notifId = (notif['id'] ?? '').toString().toLowerCase().trim();
+          final String mongoId = (notif['mongoId'] ?? '').toString().toLowerCase().trim();
 
-          if (!seenInThisBatch.contains(notifUniqueKey)) {
-            seenInThisBatch.add(notifUniqueKey);
-            notif['notifKey'] = notifUniqueKey;
+          if (seenInThisBatch.contains(notifUniqueKey)) continue;
+          seenInThisBatch.add(notifUniqueKey);
+          notif['notifKey'] = notifUniqueKey;
 
-            if (!_seenRideStatusIds.contains(notifUniqueKey)) {
-              _seenRideStatusIds.add(notifUniqueKey);
-              if (!isInitialLoad) {
-                newlyArrivedCount++;
-                if (status == 'ACCEPTED' || status == 'Accepted') {
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (mounted) _showDriverAcceptedDialog(notif);
-                  });
-                }
+          final bool isCustomerAccepted = notif['customerAccepted'] == true || status == 'CUSTOMER_ACCEPTED' || status == 'Customer Accepted';
+          final bool isPaid = notif['isPaid'] == true ||
+              notif['paymentStatus'] == 'Paid' ||
+              status == 'PAID' ||
+              status == 'Paid' ||
+              lowerPaid.contains(cleanRid);
+
+          // 1. If customer already accepted, do not show accept driver prompt
+          if (isCustomerAccepted && (status == 'ACCEPTED' || status == 'Accepted' || status == 'CUSTOMER_ACCEPTED' || status == 'Customer Accepted')) {
+            continue;
+          }
+
+          // 2. If ride is paid / pending verification, do not show payment prompt
+          if (isPaid && (status == 'COMPLETED' || status == 'Completed' || status == 'PAID' || status == 'Paid')) {
+            continue;
+          }
+
+          // 3. Check dismissed set (case-insensitive across all keys and variants)
+          if (lowerDismissed.contains(cleanKey) ||
+              lowerDismissed.contains(notifId) ||
+              lowerDismissed.contains(mongoId) ||
+              lowerDismissed.contains(cleanRid) ||
+              lowerDismissed.contains('${cleanRid}_${status.toLowerCase().trim()}') ||
+              lowerDismissed.contains('${cleanRid}_completed') ||
+              lowerDismissed.contains('${cleanRid}_accepted') ||
+              lowerDismissed.contains('${cleanRid}_driver_accepted') ||
+              lowerDismissed.contains('${cleanRid}_price_updated')) {
+            continue;
+          }
+
+          // Notification survived all filters! Check if newly arrived to trigger popup/dialog
+          if (!_seenRideStatusIds.contains(notifUniqueKey)) {
+            _seenRideStatusIds.add(notifUniqueKey);
+            if (!isInitialLoad) {
+              newlyArrivedCount++;
+              if (status == 'ACCEPTED' || status == 'Accepted') {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) _showDriverAcceptedDialog(notif);
+                });
               }
             }
-            uniqueNotifs.add(notif);
           }
-        }
 
-        final filtered = uniqueNotifs.where((n) {
-          final key = (n['notifKey'] ?? '').toString();
-          final id = (n['id'] ?? '').toString();
-          final rId = (n['rideId'] ?? n['requestId'] ?? '').toString();
-          final st = (n['status'] ?? '').toString();
-          return !_dismissedNotifIds.contains(key) &&
-                 !_dismissedNotifIds.contains(id) &&
-                 !_dismissedNotifIds.contains('${rId}_$st');
-        }).toList();
+          filtered.add(notif);
+        }
 
         setState(() {
           _notifications = filtered;
@@ -382,15 +442,94 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     } catch (_) {}
   }
 
-  // Load previously dismissed notification IDs from SharedPreferences
+  // Load previously dismissed notification IDs and paid rides from SharedPreferences
   Future<void> _loadDismissedNotifications() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final saved = prefs.getStringList('dismissed_customer_notifs') ?? [];
+      final savedPaid = prefs.getStringList('paid_customer_ride_ids') ?? [];
       if (mounted) {
         setState(() {
           _dismissedNotifIds.addAll(saved);
+          _paidRideIds.addAll(savedPaid);
+          _filterOutDismissedNotifications();
         });
+      }
+    } catch (_) {}
+  }
+
+  // Synchronously filter in-memory notifications using latest dismissed/paid sets
+  void _filterOutDismissedNotifications() {
+    final lowerDismissed = _dismissedNotifIds.map((e) => e.toLowerCase().trim()).toSet();
+    final lowerPaid = _paidRideIds.map((e) => e.toLowerCase().trim()).toSet();
+
+    _notifications.removeWhere((n) {
+      final key = (n['notifKey'] ?? '').toString().toLowerCase().trim();
+      final id = (n['id'] ?? '').toString().toLowerCase().trim();
+      final mongoId = (n['mongoId'] ?? '').toString().toLowerCase().trim();
+      final rId = (n['rideId'] ?? n['requestId'] ?? '').toString().toLowerCase().trim();
+      final st = (n['status'] ?? '').toString();
+
+      final isCustomerAccepted = n['customerAccepted'] == true || st == 'CUSTOMER_ACCEPTED' || st == 'Customer Accepted';
+      final isPaid = n['isPaid'] == true || n['paymentStatus'] == 'Paid' || st == 'PAID' || st == 'Paid' || lowerPaid.contains(rId);
+
+      if (isCustomerAccepted && (st == 'ACCEPTED' || st == 'Accepted' || st == 'CUSTOMER_ACCEPTED' || st == 'Customer Accepted')) {
+        return true;
+      }
+      if (isPaid && (st == 'COMPLETED' || st == 'Completed' || st == 'PAID' || st == 'Paid')) {
+        return true;
+      }
+      if (lowerDismissed.contains(key) ||
+          lowerDismissed.contains(id) ||
+          lowerDismissed.contains(mongoId) ||
+          lowerDismissed.contains(rId) ||
+          lowerDismissed.contains('${rId}_${st.toLowerCase().trim()}') ||
+          lowerDismissed.contains('${rId}_completed') ||
+          lowerDismissed.contains('${rId}_accepted') ||
+          lowerDismissed.contains('${rId}_driver_accepted') ||
+          lowerDismissed.contains('${rId}_price_updated')) {
+        return true;
+      }
+      return false;
+    });
+    _unreadCount = _notifications.length;
+  }
+
+  // Fetch payment history to automatically identify rides that have already been paid/submitted
+  Future<void> _syncPaidRides() async {
+    try {
+      final phone = _currentUser?.phoneNumber ?? '';
+      final customerId = _currentUser?.id ?? '';
+      if (phone.isEmpty && customerId.isEmpty) return;
+
+      final url = Uri.parse('${ApiConstants.customerPaymentHistory}?customerId=$customerId&phone=$phone');
+      final res = await http.get(url).timeout(const Duration(seconds: 4)).catchError((_) => http.Response('{}', 500));
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        final List list = data['data'] ?? [];
+        final Set<String> newPaid = {};
+        for (var p in list) {
+          if (p is Map) {
+            final rId = (p['rideId'] ?? '').toString().toLowerCase().trim();
+            if (rId.isNotEmpty) {
+              newPaid.add(rId);
+            }
+          }
+        }
+        if (newPaid.isNotEmpty && mounted) {
+          setState(() {
+            _paidRideIds.addAll(newPaid);
+            for (var rId in newPaid) {
+              _dismissedNotifIds.add(rId);
+              _dismissedNotifIds.add('${rId}_completed');
+              _dismissedNotifIds.add('${rId}_COMPLETED');
+            }
+            _filterOutDismissedNotifications();
+          });
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setStringList('paid_customer_ride_ids', _paidRideIds.toList());
+          await prefs.setStringList('dismissed_customer_notifs', _dismissedNotifIds.toList());
+        }
       }
     } catch (_) {}
   }
@@ -399,15 +538,29 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   Future<void> _dismissNotification(Map<String, dynamic> notif, int index) async {
     final notifKey = (notif['notifKey'] ?? notif['id'] ?? 'notif_$index').toString();
     final notifId = (notif['id'] ?? notif['mongoId'] ?? '').toString();
+    final mongoId = (notif['mongoId'] ?? '').toString();
     final rideId = (notif['rideId'] ?? notif['requestId'] ?? '').toString();
     final status = (notif['status'] ?? '').toString();
 
     setState(() {
-      _dismissedNotifIds.add(notifKey);
-      if (notifId.isNotEmpty) _dismissedNotifIds.add(notifId);
-      if (rideId.isNotEmpty && status.isNotEmpty) _dismissedNotifIds.add('${rideId}_$status');
+      _dismissedNotifIds.addAll([
+        notifKey,
+        if (notifId.isNotEmpty) notifId,
+        if (mongoId.isNotEmpty) mongoId,
+        if (rideId.isNotEmpty) rideId,
+        if (rideId.isNotEmpty) rideId.toLowerCase(),
+        if (rideId.isNotEmpty && status.isNotEmpty) '${rideId}_$status',
+        if (rideId.isNotEmpty && status.isNotEmpty) '${rideId}_${status.toLowerCase()}',
+        if (rideId.isNotEmpty) '${rideId}_accepted',
+        if (rideId.isNotEmpty) '${rideId}_ACCEPTED',
+        if (rideId.isNotEmpty) '${rideId}_completed',
+        if (rideId.isNotEmpty) '${rideId}_COMPLETED',
+        if (rideId.isNotEmpty) '${rideId}_price_updated',
+        if (rideId.isNotEmpty) '${rideId}_PRICE_UPDATED',
+        if (rideId.isNotEmpty) '${rideId}_DRIVER_ACCEPTED',
+      ]);
       _notifications.removeAt(index);
-      if (_unreadCount > 0) _unreadCount--;
+      _unreadCount = _notifications.length;
     });
 
     try {
@@ -416,7 +569,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     } catch (_) {}
 
     try {
-      final targetId = notif['mongoId'] ?? notif['id'] ?? notif['rideId'] ?? '';
+      final targetId = mongoId.isNotEmpty ? mongoId : (notifId.isNotEmpty ? notifId : rideId);
       if (targetId.isNotEmpty) {
         http.post(
           Uri.parse(ApiConstants.dismissCustomerNotification(targetId)),
@@ -424,6 +577,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
           body: json.encode({
             'customerId': _currentUser?.id,
             'phone': _currentUser?.phoneNumber,
+            'rideId': rideId,
           }),
         ).catchError((_) => http.Response('{}', 500));
       }
@@ -445,11 +599,42 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     for (var n in _notifications) {
       final key = (n['notifKey'] ?? n['id'] ?? '').toString();
       final id = (n['id'] ?? '').toString();
+      final mongoId = (n['mongoId'] ?? '').toString();
       final rId = (n['rideId'] ?? n['requestId'] ?? '').toString();
       final st = (n['status'] ?? '').toString();
+
       if (key.isNotEmpty) _dismissedNotifIds.add(key);
       if (id.isNotEmpty) _dismissedNotifIds.add(id);
-      if (rId.isNotEmpty && st.isNotEmpty) _dismissedNotifIds.add('${rId}_$st');
+      if (mongoId.isNotEmpty) _dismissedNotifIds.add(mongoId);
+      if (rId.isNotEmpty) {
+        _dismissedNotifIds.add(rId);
+        _dismissedNotifIds.add(rId.toLowerCase());
+        _dismissedNotifIds.add('${rId}_accepted');
+        _dismissedNotifIds.add('${rId}_ACCEPTED');
+        _dismissedNotifIds.add('${rId}_completed');
+        _dismissedNotifIds.add('${rId}_COMPLETED');
+        _dismissedNotifIds.add('${rId}_price_updated');
+        _dismissedNotifIds.add('${rId}_PRICE_UPDATED');
+        _dismissedNotifIds.add('${rId}_DRIVER_ACCEPTED');
+      }
+      if (rId.isNotEmpty && st.isNotEmpty) {
+        _dismissedNotifIds.add('${rId}_$st');
+        _dismissedNotifIds.add('${rId}_${st.toLowerCase()}');
+      }
+
+      // Also call individual dismiss on backend
+      final targetId = mongoId.isNotEmpty ? mongoId : (id.isNotEmpty ? id : rId);
+      if (targetId.isNotEmpty) {
+        http.post(
+          Uri.parse(ApiConstants.dismissCustomerNotification(targetId)),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'customerId': _currentUser?.id,
+            'phone': _currentUser?.phoneNumber,
+            'rideId': rId,
+          }),
+        ).catchError((_) => http.Response('{}', 500));
+      }
     }
 
     setState(() {
@@ -647,13 +832,16 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
         action: SnackBarAction(
           label: 'PAY',
           textColor: Colors.white,
-          onPressed: () {
-            Navigator.push(
+          onPressed: () async {
+            await Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) => PaymentDetailsScreen(rideData: notif),
               ),
             );
+            await _loadDismissedNotifications();
+            await _syncPaidRides();
+            _fetchCustomerNotifications();
           },
         ),
       ),
@@ -668,28 +856,71 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       final customerName = _currentUser?.fullName ?? _currentUser?.phoneNumber ?? 'Customer';
       final customerPhone = _currentUser?.phoneNumber ?? '';
 
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/rides/customer-accept'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'rideId': rideId,
-          'customerId': _currentUser?.id,
-          'customerName': customerName,
-          'customerPhone': customerPhone,
-        }),
-      ).timeout(const Duration(seconds: 8));
+      final String rId = (notif['requestId'] ?? notif['id'] ?? notif['rideId'] ?? '').toString();
+      final String notifKey = (notif['notifKey'] ?? notif['notificationId'] ?? notif['id'] ?? '${rId}_ACCEPTED').toString();
 
-      final bool isSuccess = response.statusCode == 200 || response.statusCode == 201;
+      // 1. Immediately update UI state and dismiss locally so it never persists/reappears
+      if (mounted) {
+        setState(() {
+          notif['customerAccepted'] = true;
+          notif['status'] = 'CUSTOMER_ACCEPTED';
+          notif['subtitle'] = 'You accepted this ride. Driver ${notif['driverName'] ?? ''} has been notified!';
+          _dismissedNotifIds.addAll([
+            notifKey,
+            rId,
+            rId.toLowerCase(),
+            '${rId}_ACCEPTED',
+            '${rId}_accepted',
+            '${rId}_CUSTOMER_ACCEPTED',
+            '${rId}_DRIVER_ACCEPTED',
+            (notif['id'] ?? '').toString(),
+            (notif['notificationId'] ?? '').toString(),
+            (notif['mongoId'] ?? '').toString(),
+          ]);
+          _notifications.removeWhere((n) {
+            final nId = (n['requestId'] ?? n['id'] ?? n['rideId'] ?? '').toString();
+            final nKey = (n['notifKey'] ?? n['notificationId'] ?? n['id'] ?? '').toString();
+            return nId == rId || nKey == notifKey || nKey == '${rId}_ACCEPTED' || nKey == '${rId}_accepted';
+          });
+          _unreadCount = _notifications.length;
+        });
+      }
+
+      // 2. Persist to SharedPreferences immediately so restart preserves this dismissal
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setStringList('dismissed_customer_notifs', _dismissedNotifIds.toList());
+      } catch (_) {}
+
+      // 3. Mark dismissed on backend CustomerNotification (compatible with both live Vercel and local)
+      try {
+        final targetId = notif['mongoId'] ?? notif['id'] ?? rId;
+        http.post(
+          Uri.parse(ApiConstants.dismissCustomerNotification(targetId)),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'customerId': _currentUser?.id,
+            'phone': _currentUser?.phoneNumber,
+            'rideId': rId,
+          }),
+        ).catchError((_) => http.Response('{}', 500));
+      } catch (_) {}
+
+      // 4. Send customer-accept payload to backend
+      try {
+        await http.post(
+          Uri.parse('$baseUrl/api/rides/customer-accept'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'rideId': rideId,
+            'customerId': _currentUser?.id,
+            'customerName': customerName,
+            'customerPhone': customerPhone,
+          }),
+        ).timeout(const Duration(seconds: 6)).catchError((_) => http.Response('{}', 500));
+      } catch (_) {}
 
       if (mounted) {
-        if (isSuccess) {
-          setState(() {
-            notif['customerAccepted'] = true;
-            notif['status'] = 'CUSTOMER_ACCEPTED';
-            notif['subtitle'] = 'You accepted this ride. Driver ${notif['driverName'] ?? ''} has been notified!';
-          });
-        }
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: const Color(0xFF10B981),
@@ -1261,12 +1492,46 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       final isAccept = action == 'ACCEPT';
       final statusText = isAccept ? 'Fare Accepted' : 'Fare Rejected';
 
+      final String rId = (notif['requestId'] ?? notif['id'] ?? notif['rideId'] ?? '').toString();
+      final String notifKey = (notif['notifKey'] ?? notif['notificationId'] ?? notif['id'] ?? '${rId}_price_updated').toString();
+
       setState(() {
         notif['fareResponseStatus'] = statusText;
         notif['subtitle'] = isAccept
             ? 'You accepted the fare of ${notif['fareFormatted'] ?? ''}. Admin notified!'
             : 'You rejected the fare of ${notif['fareFormatted'] ?? ''}. Admin notified!';
+        _dismissedNotifIds.addAll([
+          notifKey,
+          '${rId}_price_updated',
+          '${rId}_PRICE_UPDATED',
+          (notif['id'] ?? '').toString(),
+          (notif['notificationId'] ?? '').toString(),
+        ]);
+        _notifications.removeWhere((n) {
+          final nId = (n['requestId'] ?? n['id'] ?? n['rideId'] ?? '').toString();
+          final nKey = (n['notifKey'] ?? n['notificationId'] ?? n['id'] ?? '').toString();
+          return nKey == notifKey || nKey == '${rId}_price_updated' || (nId == rId && n['status'] == 'PRICE_UPDATED');
+        });
+        _unreadCount = _notifications.length;
       });
+
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setStringList('dismissed_customer_notifs', _dismissedNotifIds.toList());
+      } catch (_) {}
+
+      try {
+        final targetId = notif['mongoId'] ?? notif['id'] ?? rId;
+        http.post(
+          Uri.parse(ApiConstants.dismissCustomerNotification(targetId)),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'customerId': _currentUser?.id,
+            'phone': _currentUser?.phoneNumber,
+            'rideId': rId,
+          }),
+        ).catchError((_) => http.Response('{}', 500));
+      } catch (_) {}
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1537,7 +1802,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                               ],
                             ),
                             trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
-                            onTap: () {
+                            onTap: () async {
                               Navigator.pop(context);
                               if (isDriverUnavail) {
                                 Navigator.push(
@@ -1549,12 +1814,15 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                               } else if (isPriceUpdate) {
                                 _showFareApprovalDialog(notif);
                               } else if (isCompleted) {
-                                Navigator.push(
+                                await Navigator.push(
                                   context,
                                   MaterialPageRoute(
                                     builder: (context) => PaymentDetailsScreen(rideData: notif),
                                   ),
                                 );
+                                await _loadDismissedNotifications();
+                                await _syncPaidRides();
+                                _fetchCustomerNotifications();
                               } else {
                                 _showDriverAcceptedDialog(notif);
                               }

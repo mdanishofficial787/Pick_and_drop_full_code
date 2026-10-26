@@ -416,8 +416,14 @@ exports.updateScheduleRide = async (req, res) => {
     if (ride.status === "COMPLETED" || ride.status === "Completed") {
       try {
         await CustomerNotification.updateMany(
-          { rideId: ride.requestId, status: "ACCEPTED" },
-          { isDismissed: true }
+          {
+            $or: [
+              { rideId: ride.requestId },
+              { rideId: ride._id ? ride._id.toString() : "" }
+            ],
+            status: { $ne: "COMPLETED" }
+          },
+          { isDismissed: true, isRead: true }
         ).catch(() => {});
 
         await CustomerNotification.findOneAndUpdate(

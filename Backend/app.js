@@ -114,7 +114,35 @@ async function fixStaleIndexes() {
   }
 }
 
-connectDB().then(() => fixStaleIndexes());
+    connectDB().then(async () => {
+      await fixStaleIndexes();
+      try {
+        const db = mongoose.connection.db;
+        // Clean up mock/stale notifications from drivernotifications
+        const delDriver = await db.collection("drivernotifications").deleteMany({
+          $or: [
+            { title: { $regex: "Route Setup", $options: "i" } },
+            { title: { $regex: "Route Match", $options: "i" } },
+            { title: { $regex: "Route Accepted:", $options: "i" } },
+            { type: "ROUTE_ACCEPTED" }
+          ]
+        });
+
+        // Clean up mock/stale notifications from customernotifications
+        const delCust = await db.collection("customernotifications").deleteMany({
+          $or: [
+            { title: "Dismissed All" },
+            { title: "Dismissed Notification" },
+            { status: "DISMISSED" },
+            { rideId: { $in: ["REQ-8031", "REQ-8032", "REQ-8033", "REQ-8035", "REQ-8036", "REQ-8037", "REQ-8038", "REQ-8039", "REQ-8040", "REQ-8041", "REQ-8042", "TT-7001"] } }
+          ]
+        });
+
+        console.log(`🧹 Cleaned stale notifications: ${delDriver.deletedCount} driver notifs, ${delCust.deletedCount} customer notifs.`);
+      } catch (e) {
+        console.error("Cleanup notifs error:", e);
+      }
+    });
 
 
 const rideRoutes = require("./Route/rideRoute");

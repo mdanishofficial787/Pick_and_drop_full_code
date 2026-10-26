@@ -1,51 +1,44 @@
-﻿const mongoose = require("mongoose");
+const mongoose = require("mongoose");
 
 const otpSchema = new mongoose.Schema(
     {
         customerId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "Customer",
-            required: true
+            required: false,
+            default: null
         },
-email: {
-    type: String,
-    required: true,
-    lowercase: true,
-    trim: true
-},
-        
-
+        email: {
+            type: String,
+            required: true,
+            lowercase: true,
+            trim: true
+        },
         otp: {
             type: String,
             required: true
         },
-
         otpExpiresAt: {
             type: Date,
             required: true
         },
-
         otpAttempts: {
             type: Number,
             default: 0
         },
-
         verified: {
             type: Boolean,
             default: false
         },
-
         resendCount: {
             type: Number,
             default: 0
         },
-
         lastResendAt: {
             type: Date,
             default: null
         }
     },
-
     {
         timestamps: true
     }

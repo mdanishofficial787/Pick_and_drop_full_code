@@ -1,4 +1,4 @@
-﻿const Driver = require("../schema/Driver");
+const Driver = require("../schema/Driver");
 const PasswordResetRequest = require("../schema/PasswordResetRequest");
 
 const sendForgotPasswordOTP = async (req, res) => {
@@ -12,12 +12,23 @@ const sendForgotPasswordOTP = async (req, res) => {
             });
         }
 
-        const cleanEmail = Email.toLowerCase().trim();
+        const cleanInput = Email.trim();
+        const cleanEmail = cleanInput.toLowerCase();
+        const digitsOnly = cleanInput.replace(/\D/g, "");
+        const core = digitsOnly.replace(/^92/, "").replace(/^0/, "");
+        const phoneVariants = Array.from(new Set([
+            cleanInput,
+            digitsOnly,
+            core,
+            "0" + core,
+            "+92" + core,
+            "92" + core
+        ])).filter(Boolean);
 
         const driver = await Driver.findOne({
             $or: [
                 { Email: cleanEmail },
-                { PhoneNumber: Email.trim() }
+                { PhoneNumber: { $in: phoneVariants } }
             ]
         });
 

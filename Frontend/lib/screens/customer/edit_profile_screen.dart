@@ -98,14 +98,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String? _validate() {
     final name = _fullNameController.text.trim();
     final email = _emailController.text.trim();
-    final phone = _phoneController.text.trim();
+    final cleanPhone = _phoneController.text.replaceAll(RegExp(r'[\s\-()]'), '');
 
     if (name.length < 3) return 'Full name must be at least 3 characters';
     if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
       return 'Please enter a valid email address';
     }
-    if (!RegExp(r'^[0-9]{7,15}$').hasMatch(phone)) {
-      return 'Phone number must be 7 to 15 digits (numbers only)';
+    final pakPhoneRegex = RegExp(r'^((\+92|92)?(0)?3[0-9]{9})$');
+    if (!pakPhoneRegex.hasMatch(cleanPhone)) {
+      return 'Please enter a valid Pakistani phone number (e.g. 03328904416)';
     }
     return null;
   }
@@ -125,10 +126,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     setState(() => _isSaving = true);
 
     try {
+      final cleanPhone = _phoneController.text.replaceAll(RegExp(r'[\s\-()]'), '');
+      final formattedPhone = cleanPhone.startsWith('+92')
+          ? '0${cleanPhone.substring(3)}'
+          : (cleanPhone.startsWith('92') && cleanPhone.length == 12)
+              ? '0${cleanPhone.substring(2)}'
+              : cleanPhone.startsWith('3')
+                  ? '0$cleanPhone'
+                  : cleanPhone;
+
       final response = await AuthService.updateProfile(
         fullName: _fullNameController.text.trim(),
         email: _emailController.text.trim(),
-        phoneNumber: _phoneController.text.trim(),
+        phoneNumber: formattedPhone,
         photoBytes: _selectedPhotoBytes,
         customerId: _currentUser!.id,
       );
@@ -389,6 +399,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     _buildInputGroup(
                       label: 'Phone Number',
                       controller: _phoneController,
+                      hintText: '03328904416',
                       icon: Icons.phone_outlined,
                       keyboardType: TextInputType.phone,
                       inputFormatters: [
@@ -434,6 +445,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     required TextEditingController controller,
     required IconData icon,
     required TextInputType keyboardType,
+    String? hintText,
     List<TextInputFormatter>? inputFormatters,
   }) {
     return Column(
@@ -464,6 +476,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 enabled: !_isSaving,
                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
                 decoration: InputDecoration(
+                  hintText: hintText,
+                  hintStyle: const TextStyle(color: Colors.black38, fontSize: 14),
                   fillColor: Colors.white,
                   filled: true,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),

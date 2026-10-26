@@ -239,39 +239,52 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen>
       return;
     }
 
+    final cleanPhone = _phoneController.text.replaceAll(RegExp(r'[\s\-()]'), '');
+    final pakPhoneRegex = RegExp(r'^((\+92|92)?(0)?3[0-9]{9})$');
+    if (!pakPhoneRegex.hasMatch(cleanPhone)) {
+      _showSnackbar('Please enter a valid Pakistani phone number (e.g. 03328904416)');
+      return;
+    }
+
     if (_passwordController.text != _confirmPasswordController.text) {
       _showSnackbar('Password and Confirm Password do not match');
       return;
     }
 
-      setState(() => _isSubmitting = true);
-      try {
-        final token = await DriverApiService.registerDriver(
-          name: _nameController.text.trim(),
-          countryCode: '+92',
-          phoneNumber: _phoneController.text.trim(),
-          email: _emailController.text.trim(),
-          password: _passwordController.text,
-          cnicNumber: _cnicController.text.trim(),
-          license: _licenseNumberController.text.trim(),
-          licenseExpiryDate: _licenseExpiryDate!.toIso8601String(),
-          driverPhoto: _avatarFile!,
-          cnicFront: _uploadedDocFiles['CNIC FRONT']!,
-          cnicBack: _uploadedDocFiles['CNIC BACK']!,
-          licenseFront: _uploadedDocFiles['LICENSE FRONT']!,
-          licenseBack: _uploadedDocFiles['LICENSE BACK']!,
-        );
-  
-        if (!mounted) return;
-        widget.onContinue(token);
-      } on ApiException catch (e) {
-        _showSnackbar(e.message);
-      } catch (e) {
-        debugPrint('REGISTRATION ERROR: $e');
-        _showSnackbar('Server Error: $e');
-      } finally {
-        if (mounted) setState(() => _isSubmitting = false);
-      }
+    setState(() => _isSubmitting = true);
+    try {
+      final token = await DriverApiService.registerDriver(
+        name: _nameController.text.trim(),
+        countryCode: '+92',
+        phoneNumber: cleanPhone.startsWith('+92')
+            ? '0${cleanPhone.substring(3)}'
+            : (cleanPhone.startsWith('92') && cleanPhone.length == 12)
+                ? '0${cleanPhone.substring(2)}'
+                : cleanPhone.startsWith('3')
+                    ? '0$cleanPhone'
+                    : cleanPhone,
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+        cnicNumber: _cnicController.text.trim(),
+        license: _licenseNumberController.text.trim(),
+        licenseExpiryDate: _licenseExpiryDate!.toIso8601String(),
+        driverPhoto: _avatarFile!,
+        cnicFront: _uploadedDocFiles['CNIC FRONT']!,
+        cnicBack: _uploadedDocFiles['CNIC BACK']!,
+        licenseFront: _uploadedDocFiles['LICENSE FRONT']!,
+        licenseBack: _uploadedDocFiles['LICENSE BACK']!,
+      );
+
+      if (!mounted) return;
+      widget.onContinue(token);
+    } on ApiException catch (e) {
+      _showSnackbar(e.message);
+    } catch (e) {
+      debugPrint('REGISTRATION ERROR: $e');
+      _showSnackbar('Server Error: $e');
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   void _showSnackbar(String message) {
@@ -369,10 +382,21 @@ class _PersonalInfoScreenState extends State<PersonalInfoScreen>
 
                 CapsuleInputField(
                   label: 'PHONE NUMBER',
-                  hintText: '+92 3XX XXXXXXX',
+                  hintText: '03328904416',
                   controller: _phoneController,
                   showLabelInside: false,
                   keyboardType: TextInputType.phone,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Phone number is required';
+                    }
+                    final clean = value.replaceAll(RegExp(r'[\s\-()]'), '');
+                    final pakPhoneRegex = RegExp(r'^((\+92|92)?(0)?3[0-9]{9})$');
+                    if (!pakPhoneRegex.hasMatch(clean)) {
+                      return 'Enter a valid Pakistani number (e.g. 03328904416)';
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 10),
 

@@ -30,6 +30,8 @@ class ProfileSettingsScreen extends StatefulWidget {
 class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   String? currentProfilePic;
   String currentDriverName = "";
+  String? currentDriverEmail;
+  String? currentDriverPhone;
 
   // Becomes true after a successful edit so the previous screen can refresh too
   bool _profileChanged = false;
@@ -43,7 +45,6 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
   }
 
   // The backend stores the photo as { url, public_id } under "driverPhoto"
-    // The backend stores the photo as { url, public_id } under "driverPhoto"
   String? _extractPhotoUrl(dynamic d) {
     final p = d['driverPhoto'] ?? d['profilePic'] ?? d['profilePicture'];
     if (p is Map) return p['url']?.toString();
@@ -59,12 +60,12 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
         headers: widget.token != null ? {'Authorization': 'Bearer ${widget.token}'} : {},
       );
 
-      debugPrint('Dashboard GET driver profile ${res.statusCode}');
+      debugPrint('ProfileSettings GET driver profile ${res.statusCode}');
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final d = data['driver'] ?? data['data'] ?? data;
-        if (mounted) {
+        if (mounted && d != null) {
           setState(() {
             // Backend field is "Name" (capital N)
             currentDriverName = d['Name']?.toString() ??
@@ -72,6 +73,8 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                 d['name']?.toString() ??
                 currentDriverName;
             currentProfilePic = _extractPhotoUrl(d) ?? currentProfilePic;
+            currentDriverEmail = d['Email']?.toString() ?? d['email']?.toString() ?? currentDriverEmail;
+            currentDriverPhone = d['PhoneNumber']?.toString() ?? d['phoneNumber']?.toString() ?? currentDriverPhone;
           });
         }
       }
@@ -80,18 +83,13 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     }
   }
 
-  void _showSnack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.red),
-    );
-  }
-
   Future<void> _openEditProfile() async {
     final updated = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => EditProfileScreen(
           driverName: currentDriverName,
+          email: currentDriverEmail,
+          phone: currentDriverPhone,
           profilePic: currentProfilePic,
           driverId: widget.driverId,
           token: widget.token,
@@ -108,79 +106,94 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF0F4F8),
-      appBar: AppBar(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        // Automatically returns result
+      },
+      child: Scaffold(
         backgroundColor: const Color(0xFFF0F4F8),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF111827)),
-          onPressed: () => Navigator.pop(context, _profileChanged),
-        ),
-        centerTitle: true,
-        title: Text(
-          'Profile Settings',
-          style: GoogleFonts.inter(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: const Color(0xFF111827),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFFF0F4F8),
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Color(0xFF111827)),
+            onPressed: () => Navigator.pop(context, _profileChanged),
+          ),
+          centerTitle: true,
+          title: Text(
+            'Profile Settings',
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFF111827),
+            ),
           ),
         ),
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-        child: Column(
-          children: [
-            Stack(
-              alignment: Alignment.bottomRight,
-              children: [
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.grey.shade200,
-                    border: Border.all(color: Colors.white, width: 3),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.1),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          child: Column(
+            children: [
+              GestureDetector(
+                onTap: _openEditProfile,
+                child: Stack(
+                  alignment: Alignment.bottomRight,
+                  children: [
+                    Container(
+                      width: 100,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.grey.shade200,
+                        border: Border.all(color: Colors.white, width: 3),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.1),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  child: ClipOval(child: _buildProfileImage()),
+                      child: ClipOval(child: _buildProfileImage()),
+                    ),
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1959F6),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                      child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 16),
+                    ),
+                  ],
                 ),
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1959F6),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                  ),
-                  child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 16),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                currentDriverName,
+                style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w800, color: const Color(0xFF111827)),
+              ),
+              if (currentDriverEmail != null && currentDriverEmail!.trim().isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  currentDriverEmail!.trim(),
+                  style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: const Color(0xFF64748B)),
                 ),
               ],
-            ),
-            const SizedBox(height: 14),
-            Text(
-              currentDriverName,
-              style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w800, color: const Color(0xFF111827)),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-              decoration: BoxDecoration(color: const Color(0xFFD1FAE5), borderRadius: BorderRadius.circular(20)),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.verified_rounded, color: Color(0xFF059669), size: 16),
-                  const SizedBox(width: 5),
-                  Text('Verified User', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF059669))),
-                ],
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(color: const Color(0xFFD1FAE5), borderRadius: BorderRadius.circular(20)),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.verified_rounded, color: Color(0xFF059669), size: 16),
+                    const SizedBox(width: 5),
+                    Text('Verified User', style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF059669))),
+                  ],
+                ),
               ),
-            ),
             const SizedBox(height: 28),
             Container(
               decoration: BoxDecoration(
@@ -223,8 +236,9 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildProfileImage() {
     if (currentProfilePic != null && currentProfilePic!.isNotEmpty) {

@@ -33,8 +33,13 @@ module.exports.login = async (req, res) => {
         const cleanPhone = rawPhone.replace(/^(\+92|92|0)/, "");
         const phoneVariants = Array.from(new Set([rawPhone, cleanPhone, "0" + cleanPhone, "+92" + cleanPhone, "92" + cleanPhone]));
 
+        const escapedRaw = rawPhone.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const customer = await Customer.findOne({
-            PhoneNumber: { $in: phoneVariants }
+            $or: [
+                { PhoneNumber: { $in: phoneVariants } },
+                { Email: rawPhone.toLowerCase() },
+                { Email: { $regex: new RegExp('^' + escapedRaw + '$', 'i') } }
+            ]
         });
 
         // 3. Customer doesn't exist

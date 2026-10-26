@@ -53,6 +53,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     super.initState();
     currentProfilePic = widget.profilePic;
     currentDriverName = widget.driverName;
+    _loadSavedDriverDetails();
     _fetchProfile();
     _loadDismissedNotifications();
     _initSocketConnection();
@@ -119,7 +120,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       final myId = widget.driverId ?? '';
       final myName = currentDriverName.trim().toLowerCase();
       bool isForMe = false;
-      if (targetDriver.isEmpty && targetDriverName.isEmpty) isForMe = true;
+      if (myId.isNotEmpty && targetDriver.isNotEmpty && targetDriver == myId) isForMe = true;
+      final targetDriverCode = (rawObj['driverCode'] ?? rawObj['driverReferenceId'] ?? '').toString().trim().toLowerCase();
+      if (myId.isNotEmpty && targetDriverCode.isNotEmpty && (targetDriverCode == myId.toLowerCase() || targetDriverCode == myName)) isForMe = true;
       if (myId.isNotEmpty && targetDriver == myId) isForMe = true;
       if (targetDriverName.isNotEmpty && (targetDriverName.toLowerCase() == myName || targetDriverName.toLowerCase().contains(myName))) isForMe = true;
 
@@ -203,6 +206,14 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
             final key = (n['notifKey'] ?? '').toString();
             final id = (n['id'] ?? '').toString();
             final rId = (n['rideId'] ?? '').toString();
+            final type = (n['type'] ?? '').toString().toUpperCase();
+            final title = (n['title'] ?? '').toString().toLowerCase();
+
+            // Exclude route matching notifications (Route Matching feature removed)
+            if (type.contains('ROUTE') || title.contains('route match') || title.contains('route setup')) {
+              return false;
+            }
+
             return !_dismissedNotifIds.contains(key) &&
                    !_dismissedNotifIds.contains(id) &&
                    !_dismissedNotifIds.contains(rId);
@@ -836,6 +847,33 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     );
   }
 
+  String? _extractPhotoUrl(dynamic d) {
+    if (d == null) return null;
+    final p = d['driverPhoto'] ?? d['profilePic'] ?? d['profilePicture'];
+    if (p is Map) return p['url']?.toString();
+    final s = p?.toString();
+    return (s != null && s.isNotEmpty) ? s : null;
+  }
+
+  Future<void> _loadSavedDriverDetails() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keySuffix = widget.driverId != null ? '_${widget.driverId}' : '';
+      final savedName = prefs.getString('saved_driver_name$keySuffix') ?? prefs.getString('driver_name');
+      final savedPic = prefs.getString('saved_driver_photo$keySuffix') ?? prefs.getString('driver_photo');
+      if (mounted) {
+        setState(() {
+          if (savedName != null && savedName.trim().isNotEmpty) {
+            currentDriverName = savedName.trim();
+          }
+          if (savedPic != null && savedPic.trim().isNotEmpty) {
+            currentProfilePic = savedPic.trim();
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
   Future<void> _fetchProfile() async {
     if (widget.driverId == null) return;
     try {
@@ -846,14 +884,59 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         final d = data['driver'] ?? data['data'] ?? data;
-        if (mounted) {
-          setState(() {
-            currentDriverName = d['fullName']?.toString() ?? d['name']?.toString() ?? currentDriverName;
-            currentProfilePic = d['profilePic']?.toString() ?? d['profilePicture']?.toString() ?? currentProfilePic;
-          });
+        if (d != null) {
+          final fetchedName = d['Name']?.toString() ??
+              d['fullName']?.toString() ??
+              d['name']?.toString() ??
+              '';
+          final fetchedPic = _extractPhotoUrl(d);
+
+          if (mounted) {
+            setState(() {
+              if (fetchedName.trim().isNotEmpty) {
+                currentDriverName = fetchedName.trim();
+              }
+              if (fetchedPic != null && fetchedPic.trim().isNotEmpty) {
+                currentProfilePic = fetchedPic.trim();
+              }
+            });
+          }
+
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            final keySuffix = widget.driverId != null ? '_${widget.driverId}' : '';
+            if (fetchedName.trim().isNotEmpty) {
+              await prefs.setString('saved_driver_name$keySuffix', fetchedName.trim());
+              await prefs.setString('driver_name', fetchedName.trim());
+            }
+            if (fetchedPic != null && fetchedPic.trim().isNotEmpty) {
+              await prefs.setString('saved_driver_photo$keySuffix', fetchedPic.trim());
+              await prefs.setString('driver_photo', fetchedPic.trim());
+            }
+            final fetchedEmail = d['Email']?.toString() ?? d['email']?.toString();
+            if (fetchedEmail != null && fetchedEmail.trim().isNotEmpty) {
+              await prefs.setString('saved_driver_email$keySuffix', fetchedEmail.trim());
+              await prefs.setString('driver_email', fetchedEmail.trim());
+            }
+          } catch (_) {}
         }
       }
     } catch (_) {}
+  }
+
+  Future<void> _openProfileSettings() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProfileSettingsScreen(
+          driverName: currentDriverName,
+          profilePic: currentProfilePic,
+          driverId: widget.driverId,
+          token: widget.token,
+        ),
+      ),
+    );
+    // Reload the latest name and photo after coming back
+    await _fetchProfile();
   }
 
   void _showActionFeedback(BuildContext context, String title) {
@@ -904,103 +987,69 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
               child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    child: IconButton(
-                      icon: const Icon(
-                        Icons.arrow_back,
-                        color: Colors.white,
-                        size: 24,
-                      ),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ),
-                  Positioned(
-                    top: 0,
-                    right: 0,
-                    child: Stack(
-                      children: [
-                        IconButton(
-                          icon: const Icon(
-                            Icons.notifications_outlined,
-                            color: Colors.white,
-                            size: 26,
-                          ),
-                          onPressed: _showNotificationListModal,
-                        ),
-                        if (_unreadCount > 0)
-                          Positioned(
-                            right: 8,
-                            top: 8,
-                            child: Container(
-                              padding: const EdgeInsets.all(4),
-                              decoration: const BoxDecoration(
-                                color: Color(0xFFEF4444),
-                                shape: BoxShape.circle,
-                              ),
-                              constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                              child: Text(
-                                '$_unreadCount',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
+                  // Center Header Content
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (currentProfilePic != null && currentProfilePic!.isNotEmpty)
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 12, top: 4),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2.5),
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Colors.black12,
-                                blurRadius: 8,
-                                offset: Offset(0, 4),
+                      GestureDetector(
+                        onTap: _openProfileSettings,
+                        child: Stack(
+                          alignment: Alignment.bottomRight,
+                          children: [
+                            Container(
+                              margin: const EdgeInsets.only(bottom: 12, top: 4),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2.5),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black12,
+                                    blurRadius: 8,
+                                    offset: Offset(0, 4),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                          child: CircleAvatar(
-                            radius: 36,
-                            backgroundColor: Colors.white24,
-                            backgroundImage: NetworkImage(currentProfilePic!),
-                          ),
-                        )
-                      else
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 12, top: 4),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2.5),
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Colors.black12,
-                                blurRadius: 8,
-                                offset: Offset(0, 4),
+                              child: CircleAvatar(
+                                key: ValueKey(currentProfilePic),
+                                radius: 36,
+                                backgroundColor: Colors.white24,
+                                backgroundImage: (currentProfilePic != null && currentProfilePic!.isNotEmpty)
+                                    ? NetworkImage(currentProfilePic!)
+                                    : null,
+                                child: (currentProfilePic == null || currentProfilePic!.isEmpty)
+                                    ? const Icon(
+                                        Icons.person,
+                                        color: Colors.white,
+                                        size: 40,
+                                      )
+                                    : null,
                               ),
-                            ],
-                          ),
-                          child: const CircleAvatar(
-                            radius: 36,
-                            backgroundColor: Colors.white24,
-                            child: Icon(
-                              Icons.person,
-                              color: Colors.white,
-                              size: 40,
                             ),
-                          ),
+                            Positioned(
+                              right: 2,
+                              bottom: 14,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF1959F6),
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black26,
+                                      blurRadius: 4,
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(
+                                  Icons.edit,
+                                  color: Colors.white,
+                                  size: 13,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
+                      ),
                       Text(
                         'WELCOME, ${currentDriverName.toUpperCase()}!',
                         style: GoogleFonts.inter(
@@ -1021,6 +1070,63 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                         ),
                       ),
                     ],
+                  ),
+
+                  // Top Left: Back Button
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    child: IconButton(
+                      icon: const Icon(
+                        Icons.arrow_back,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                      tooltip: 'Back',
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ),
+
+                  // Top Right: Notification Bell Icon with Badge
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        IconButton(
+                          icon: const Icon(
+                            Icons.notifications_none_rounded,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                          tooltip: 'Ride Notifications',
+                          onPressed: _showNotificationListModal,
+                        ),
+                        if (_unreadCount > 0)
+                          Positioned(
+                            right: 6,
+                            top: 6,
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFEF4444),
+                                shape: BoxShape.circle,
+                              ),
+                              constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                              child: Text(
+                                '$_unreadCount',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -1273,20 +1379,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                         ),
                         const SizedBox(height: 12),
 
-                        // Card 5: Route Matching
-                        _buildMenuCard(
-                          context: context,
-                          icon: Icons.chat_bubble_outline_rounded,
-                          title: 'Route Matching',
-                          subtitle: 'See suggested Route Requests.',
-                          onTap: () {
-                            // Route Match Setup Screen is missing, placeholder for now
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text("Route Matching is under construction")),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 14),
 
                         // Profile View
                         _buildMenuCard(
@@ -1294,20 +1386,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                           icon: Icons.history_rounded,
                           title: 'Profile View',
                           subtitle: 'View your past rides and invoices.',
-                                                    onTap: () async {
-                            await Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => ProfileSettingsScreen(
-                                  driverName: currentDriverName,
-                                  profilePic: currentProfilePic,
-                                  driverId: widget.driverId,
-                                  token: widget.token,
-                                ),
-                              ),
-                            );
-                            // Reload the latest name and photo after coming back
-                            await _fetchProfile();
-                          },
+                          onTap: _openProfileSettings,
                         ),
                         const SizedBox(height: 14),
 

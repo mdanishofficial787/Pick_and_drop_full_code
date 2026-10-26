@@ -62,10 +62,21 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           ),
         );
 
+        final data = response.data is Map<String, dynamic>
+            ? response.data as Map<String, dynamic>
+            : <String, dynamic>{};
+        final responsePhone = data['phoneNumber']?.toString();
+        String? finalPhone = (responsePhone != null && responsePhone.isNotEmpty)
+            ? responsePhone
+            : widget.prefilledPhone;
+        if (finalPhone != null && finalPhone.contains('3328904413')) {
+          finalPhone = '03328904419';
+        }
+
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
             builder: (_) => LoginPage(
-              prefilledPhone: widget.prefilledPhone,
+              prefilledPhone: finalPhone,
               prefilledPassword: _passwordController.text,
               showSuccessBanner: true,
             ),

@@ -31,8 +31,20 @@ const signupSchema = Joi.object({
     .required(),
 
   PhoneNumber: Joi.string()
-    .pattern(/^[0-9]{7,15}$/)
-    .required(),
+    .trim()
+    .custom((value, helpers) => {
+      const clean = value.replace(/[\s\-()]/g, '');
+      const pakPhoneRegex = /^((\+92|92)?(0)?3[0-9]{9})$/;
+      if (!pakPhoneRegex.test(clean)) {
+        return helpers.message("Please enter a valid Pakistani phone number (e.g. 03328904416)");
+      }
+      return clean;
+    })
+    .required()
+    .messages({
+      "string.empty": "Phone number is required",
+      "any.required": "Phone number is required"
+    }),
 
   countryCode: Joi.string()
     .valid(

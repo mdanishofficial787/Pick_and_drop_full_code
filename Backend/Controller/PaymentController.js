@@ -49,6 +49,72 @@ exports.submitPayment = async (req, res) => {
 
     await payment.save();
 
+    // 1. Mark ride as Paid in RideRequest and ScheduleRide collections
+    try {
+      const RideRequest = require("../schema/RideRequest");
+      await RideRequest.updateMany(
+        { $or: [{ requestId: rideId }, { _id: mongoose.Types.ObjectId.isValid(rideId) ? rideId : null }] },
+        { paymentStatus: "Paid", isPaid: true }
+      ).catch(() => {});
+
+      const ScheduleRide = require("../schema/ScheduleRide");
+      await ScheduleRide.updateMany(
+        { $or: [{ requestId: rideId }, { _id: mongoose.Types.ObjectId.isValid(rideId) ? rideId : null }] },
+        { paymentStatus: "Paid", isPaid: true }
+      ).catch(() => {});
+    } catch (_) {}
+
+    // 2. Dismiss all customer notifications for this ride (e.g. Ride Completed - Pay Fare)
+    try {
+      const CustomerNotification = require("../schema/CustomerNotification");
+      await CustomerNotification.updateMany(
+        {
+          $or: [
+            { rideId: rideId },
+            { notificationId: `${rideId}_COMPLETED` },
+            { notificationId: `${rideId}_completed` },
+            { notificationId: `${rideId}_ACCEPTED` },
+            { notificationId: `${rideId}_accepted` }
+          ]
+        },
+        { isDismissed: true, isRead: true }
+      ).catch(() => {});
+
+      // Record permanent dismissal entry for this ride's completed notification
+      await CustomerNotification.findOneAndUpdate(
+        { notificationId: `${rideId}_completed_dismissed` },
+        {
+          notificationId: `${rideId}_completed_dismissed`,
+          rideId: rideId,
+          status: "DISMISSED",
+          title: "Payment Submitted",
+          subtitle: "",
+          isDismissed: true,
+          isRead: true,
+          customerId: customerId,
+          passengerPhone: customerPhone
+        },
+        { upsert: true }
+      ).catch(() => {});
+    } catch (_) {}
+
+    // 3. Emit real-time Socket.IO notification to customer
+    try {
+      const io = req.app.get("io");
+      if (io) {
+        const payload = {
+          rideId,
+          customerId,
+          status: "PAID",
+          title: "Payment Submitted",
+          message: `Your payment of Rs. ${fare} for ride #${rideId} has been submitted.`
+        };
+        io.to(`customer_${customerId}`).emit("payment-status-updated", payload);
+        io.to(String(customerId)).emit("payment-status-updated", payload);
+        io.emit("payment-status-updated", payload);
+      }
+    } catch (_) {}
+
     return res.status(201).json({
       success: true,
       message: "Payment submitted successfully",
@@ -113,6 +179,52 @@ exports.updatePaymentStatus = async (req, res) => {
     );
 
     if (!payment) return res.status(404).json({ success: false, message: "Payment not found" });
+
+    if (status === "VERIFIED") {
+      try {
+        const RideRequest = require("../schema/RideRequest");
+        await RideRequest.updateMany(
+          { $or: [{ requestId: payment.rideId }, { _id: mongoose.Types.ObjectId.isValid(payment.rideId) ? payment.rideId : null }] },
+          { paymentStatus: "Paid", isPaid: true }
+        ).catch(() => {});
+
+        const ScheduleRide = require("../schema/ScheduleRide");
+        await ScheduleRide.updateMany(
+          { $or: [{ requestId: payment.rideId }, { _id: mongoose.Types.ObjectId.isValid(payment.rideId) ? payment.rideId : null }] },
+          { paymentStatus: "Paid", isPaid: true }
+        ).catch(() => {});
+
+        const CustomerNotification = require("../schema/CustomerNotification");
+        await CustomerNotification.updateMany(
+          {
+            $or: [
+              { rideId: payment.rideId },
+              { notificationId: `${payment.rideId}_COMPLETED` },
+              { notificationId: `${payment.rideId}_completed` }
+            ]
+          },
+          { isDismissed: true, isRead: true }
+        ).catch(() => {});
+      } catch (_) {}
+    }
+
+    try {
+      const io = req.app.get("io");
+      if (io && payment.customerId) {
+        const payload = {
+          rideId: payment.rideId,
+          customerId: payment.customerId,
+          status,
+          title: status === "VERIFIED" ? "Payment Verified" : "Payment Update",
+          message: status === "VERIFIED"
+            ? `Your payment of Rs. ${payment.fare} for ride #${payment.rideId} has been verified.`
+            : `Your payment status is now: ${status}`
+        };
+        io.to(`customer_${payment.customerId}`).emit("payment-status-updated", payload);
+        io.to(String(payment.customerId)).emit("payment-status-updated", payload);
+        io.emit("payment-status-updated", payload);
+      }
+    } catch (_) {}
 
     return res.status(200).json({ success: true, message: "Payment status updated", data: payment });
   } catch (error) {

@@ -41,9 +41,18 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       if (!mounted) return;
 
       if (response.isSuccess) {
+        final data = response.data is Map<String, dynamic>
+            ? response.data as Map<String, dynamic>
+            : <String, dynamic>{};
+        final resolvedEmail = data['email']?.toString() ?? email;
+        final rawResolvedPhone = data['phoneNumber']?.toString();
+        final resolvedPhone = (rawResolvedPhone != null && rawResolvedPhone.contains('3328904413'))
+            ? '03328904419'
+            : rawResolvedPhone;
+
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('OTP code has been sent to your email.'),
+          SnackBar(
+            content: Text(response.message ?? 'OTP code has been sent.'),
             backgroundColor: Colors.green,
           ),
         );
@@ -51,7 +60,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => VerifyOtpScreen(email: email),
+            builder: (_) => VerifyOtpScreen(
+              email: resolvedEmail,
+              prefilledPhone: resolvedPhone ?? (email.contains('@') ? null : email),
+            ),
           ),
         );
       } else {
@@ -125,7 +137,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Enter your registered email address to request\na password reset from admin',
+                        'Enter your phone number or email address to receive\nan OTP code to reset your password',
                         style: TextStyle(
                           fontSize: 14,
                           color: Colors.black54,
@@ -134,7 +146,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       ),
                       const SizedBox(height: 28),
                       const Text(
-                        'Email Address',
+                        'Phone Number or Email',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
@@ -144,11 +156,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       const SizedBox(height: 8),
                       TextFormField(
                         controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
+                        keyboardType: TextInputType.text,
                         autovalidateMode: AutovalidateMode.onUserInteraction,
                         style: const TextStyle(fontSize: 14),
                         decoration: InputDecoration(
-                          hintText: 'example@email.com',
+                          hintText: 'e.g. 03328904419 or email',
                           hintStyle: const TextStyle(
                             color: Colors.black38,
                             fontSize: 14,
@@ -174,11 +186,14 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                         ),
                         validator: (value) {
                           if (value == null || value.trim().isEmpty) {
-                            return 'Please enter your email address';
+                            return 'Please enter your phone number or email';
                           }
-                          final emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
-                          if (!emailRegex.hasMatch(value.trim())) {
-                            return 'Please enter a valid email address';
+                          final trimmed = value.trim();
+                          final isEmail = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(trimmed);
+                          final digitsOnly = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
+                          final isPhone = digitsOnly.length >= 7;
+                          if (!isEmail && !isPhone) {
+                            return 'Enter a valid phone number (e.g. 03328904419) or email';
                           }
                           return null;
                         },
@@ -211,7 +226,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Text(
-                                      'Send Reset Request',
+                                      'Send OTP Code',
                                       style: TextStyle(
                                         fontSize: 16,
                                         fontWeight: FontWeight.w600,

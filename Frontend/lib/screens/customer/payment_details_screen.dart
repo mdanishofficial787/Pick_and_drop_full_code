@@ -8,7 +8,9 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart'; // For kIsWeb
 import 'package:flutter/services.dart'; // For Clipboard
+import 'dart:convert';
 import '../../services/auth_service.dart';
+import '../../constants/api_constants.dart';
 import 'payment_status_screen.dart';
 
 class PaymentDetailsScreen extends StatefulWidget {
@@ -71,6 +73,40 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
 
       var response = await request.send();
       if (response.statusCode == 200 || response.statusCode == 201) {
+        // Dismiss the completed payment notification so customer dashboard removes it immediately
+        try {
+          final savedPrefs = await SharedPreferences.getInstance();
+          final dismissedList = savedPrefs.getStringList('dismissed_customer_notifs') ?? [];
+          final paidList = savedPrefs.getStringList('paid_customer_ride_ids') ?? [];
+          final notifKey = (widget.rideData['notifKey'] ?? widget.rideData['notificationId'] ?? '').toString();
+          final rawId = (widget.rideData['id'] ?? '').toString();
+          dismissedList.addAll([
+            rideId,
+            rideId.toLowerCase(),
+            '${rideId}_COMPLETED',
+            '${rideId}_completed',
+            '${rideId.toLowerCase()}_completed',
+            if (notifKey.isNotEmpty) notifKey,
+            if (rawId.isNotEmpty) rawId,
+          ]);
+          paidList.add(rideId.toLowerCase().trim());
+          await savedPrefs.setStringList('dismissed_customer_notifs', dismissedList.toSet().toList());
+          await savedPrefs.setStringList('paid_customer_ride_ids', paidList.toSet().toList());
+        } catch (_) {}
+
+        try {
+          final targetId = widget.rideData['mongoId'] ?? widget.rideData['id'] ?? rideId;
+          http.post(
+            Uri.parse(ApiConstants.dismissCustomerNotification(targetId)),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({
+              'customerId': user?.id,
+              'phone': user?.phoneNumber,
+              'rideId': rideId,
+            }),
+          ).catchError((_) => http.Response('{}', 500));
+        } catch (_) {}
+
         if (!mounted) return;
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => PaymentStatusScreen(
           rideId: rideId, fare: fare, imageFile: _paymentProof, webImageFile: _webPaymentProof

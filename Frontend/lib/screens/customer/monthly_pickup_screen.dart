@@ -359,7 +359,11 @@ class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
       final timeReachStr = _formatTime(_timeToReach);
       final timeLeaveStr = _formatTime(_timeToLeave);
 
-      final num fareValue = (_tripType == 'Two Way') ? 12000 : 9500;
+      final cleanFareText = _fareController.text.replaceAll(RegExp(r'[^0-9]'), '');
+      final enteredFare = int.tryParse(cleanFareText);
+      final num fareValue = (enteredFare != null && enteredFare > 0)
+          ? enteredFare
+          : ((_tripType == 'Two Way') ? 12000 : 9500);
 
       final customScheduleData = {
         'tripType': _tripType,
@@ -370,6 +374,7 @@ class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
         'passengersCount': _passengersCount,
         'selectedDays': _selectedDays,
         'schedulePreset': _schedulePreset,
+        'fare': fareValue.toInt(),
         'returnPickupLocation': _tripType == 'Two Way' ? _returnPickupController.text.trim() : null,
         'returnDropoffLocation': _tripType == 'Two Way' ? _returnDropoffController.text.trim() : null,
         'returnDate': _tripType == 'Two Way' ? DateFormat('yyyy-MM-dd').format(_returnDate) : null,
@@ -423,6 +428,26 @@ class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
                   const Text('BOOKING SUBMITTED!', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
                   const SizedBox(height: 6),
                   Text('Request ID: $reqId', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _navyBlue)),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFBFDBFE)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.payments_outlined, size: 18, color: _navyBlue),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Fare: Rs. ${NumberFormat('#,##0').format(fareValue)}',
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _navyBlue),
+                        ),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 12),
                   const Text(
                     'Your monthly pickup booking request has been sent to Ride Dispatch. Admin will assign a verified driver shortly.',
@@ -1084,9 +1109,10 @@ class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
                       const SizedBox(height: 10),
                       TextField(
                         controller: _fareController,
+                        onChanged: (_) => setState(() {}),
                         keyboardType: TextInputType.number,
                         decoration: InputDecoration(
-                          hintText: 'e.g. 12,000',
+                          hintText: _tripType == 'Two Way' ? '12,000' : '9,500',
                           suffixText: 'PKR',
                           fillColor: _unselectedPillBg,
                           filled: true,
@@ -1130,7 +1156,7 @@ class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
                       Row(
                         children: [
                           Expanded(child: _buildSummaryItem('Gender Preference', _genderPreference)),
-                          Expanded(child: _buildSummaryItem('Locations & Time', 'As selected above')),
+                          Expanded(child: _buildSummaryItem('Entered Fare', _fareController.text.trim().isNotEmpty ? 'PKR ${_fareController.text.trim()}' : 'PKR ${_tripType == 'Two Way' ? '12,000' : '9,500'}')),
                         ],
                       ),
                     ],

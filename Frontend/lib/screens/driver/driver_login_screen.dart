@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'driver_dashboard_screen.dart';
 import '../../services/driver_api_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '/screens/driver/forgot_password_screen.dart';
 
 class DriverLoginScreen extends StatefulWidget {
@@ -38,7 +39,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
     try {
       final response = await DriverApiService.loginDriver(
         countryCode: '+92',
-        phoneNumber: _phoneController.text,
+        phoneNumber: _phoneController.text.trim(),
         password: _passwordController.text,
       );
 
@@ -130,6 +131,19 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
       final String? profilePic = extractUrl(driverObj['driverPhoto']) ??
           extractUrl(driverData['profilePic']) ??
           extractUrl(driverData['driverPhoto']);
+
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final keySuffix = driverId != null ? '_$driverId' : '';
+        await prefs.setString('saved_driver_name$keySuffix', driverName);
+        await prefs.setString('driver_name', driverName);
+        if (profilePic != null && profilePic.isNotEmpty) {
+          await prefs.setString('saved_driver_photo$keySuffix', profilePic);
+          await prefs.setString('driver_photo', profilePic);
+        }
+      } catch (_) {}
+
+      if (!mounted) return;
 
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(

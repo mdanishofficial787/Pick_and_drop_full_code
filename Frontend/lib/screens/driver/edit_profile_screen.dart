@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:typed_data';
 import '/api_config.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http_parser/http_parser.dart';
 
@@ -126,7 +127,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     final nameVal = _nameController.text.trim();
     final emailVal = _emailController.text.trim();
-    final phoneVal = _phoneController.text.trim();
+    final rawPhone = _phoneController.text.replaceAll(RegExp(r'[\s\-()]'), '');
 
     if (nameVal.isEmpty) {
       _showSnack('Please enter your name', isError: true);
@@ -136,6 +137,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       _showSnack('Please enter a valid email address', isError: true);
       return;
     }
+
+    if (rawPhone.isNotEmpty) {
+      final pakPhoneRegex = RegExp(r'^((\+92|92)?(0)?3[0-9]{9})$');
+      if (!pakPhoneRegex.hasMatch(rawPhone)) {
+        _showSnack('Please enter a valid Pakistani phone number (e.g. 03328904416)', isError: true);
+        return;
+      }
+    }
+
+    final formattedPhone = rawPhone.isNotEmpty
+        ? (rawPhone.startsWith('+92')
+            ? '0${rawPhone.substring(3)}'
+            : (rawPhone.startsWith('92') && rawPhone.length == 12)
+                ? '0${rawPhone.substring(2)}'
+                : rawPhone.startsWith('3')
+                    ? '0$rawPhone'
+                    : rawPhone)
+        : '';
 
     setState(() => _isSaving = true);
 
@@ -153,7 +172,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
         request.fields['Name'] = nameVal;
         if (emailVal.isNotEmpty) request.fields['Email'] = emailVal;
-        if (phoneVal.isNotEmpty) request.fields['PhoneNumber'] = phoneVal;
+        if (formattedPhone.isNotEmpty) request.fields['PhoneNumber'] = formattedPhone;
 
         final bytes = await _newProfilePic!.readAsBytes();
         final String name = _newProfilePic!.name.isNotEmpty ? _newProfilePic!.name : 'profilePic.jpg';
@@ -171,7 +190,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       } else {
         final Map<String, dynamic> bodyData = {'Name': nameVal};
         if (emailVal.isNotEmpty) bodyData['Email'] = emailVal;
-        if (phoneVal.isNotEmpty) bodyData['PhoneNumber'] = phoneVal;
+        if (formattedPhone.isNotEmpty) bodyData['PhoneNumber'] = formattedPhone;
 
         res = await http.patch(
           Uri.parse('$kBaseUrl/driver/${widget.driverId}'),
@@ -183,6 +202,26 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       debugPrint('PATCH ${res.statusCode}: ${res.body}');
 
       if (res.statusCode == 200) {
+        try {
+          final data = jsonDecode(res.body);
+          final updatedDriver = data['driver'] ?? data['data'] ?? data;
+          final updatedName = updatedDriver['Name']?.toString() ??
+              updatedDriver['fullName']?.toString() ??
+              nameVal;
+          final updatedPic = _extractPhotoUrl(updatedDriver);
+          final prefs = await SharedPreferences.getInstance();
+          final keySuffix = widget.driverId != null ? '_${widget.driverId}' : '';
+          await prefs.setString('saved_driver_name$keySuffix', updatedName);
+          await prefs.setString('driver_name', updatedName);
+          if (updatedPic != null && updatedPic.isNotEmpty) {
+            await prefs.setString('saved_driver_photo$keySuffix', updatedPic);
+            await prefs.setString('driver_photo', updatedPic);
+          }
+          if (emailVal.isNotEmpty) {
+            await prefs.setString('saved_driver_email$keySuffix', emailVal);
+            await prefs.setString('driver_email', emailVal);
+          }
+        } catch (_) {}
         _showSnack('Profile updated successfully!');
         if (mounted) Navigator.pop(context, true);
         return;
@@ -310,30 +349,30 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     child: Column(
                       children: [
                         // Profile Photo
-                        Stack(
-                          alignment: Alignment.bottomRight,
-                          children: [
-                            Container(
-                              width: 90,
-                              height: 90,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.grey.shade200,
-                                border: Border.all(color: Colors.white, width: 3),
-                                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 12, offset: const Offset(0, 4))],
+                        GestureDetector(
+                          onTap: _showImagePickerModal,
+                          child: Stack(
+                            alignment: Alignment.bottomRight,
+                            children: [
+                              Container(
+                                width: 90,
+                                height: 90,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.grey.shade200,
+                                  border: Border.all(color: Colors.white, width: 3),
+                                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 12, offset: const Offset(0, 4))],
+                                ),
+                                child: ClipOval(child: _buildProfileImage()),
                               ),
-                              child: ClipOval(child: _buildProfileImage()),
-                            ),
-                            GestureDetector(
-                              onTap: _showImagePickerModal,
-                              child: Container(
+                              Container(
                                 width: 28,
                                 height: 28,
                                 decoration: BoxDecoration(color: const Color(0xFF1959F6), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
                                 child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 14),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 28),
 
@@ -466,18 +505,42 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             keyboardType: keyboardType,
                             autofocus: true,
                             style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: const Color(0xFF111827)),
-                            decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.zero, border: InputBorder.none),
-                            onSubmitted: (_) => setState(() => _editingField = null),
+                            decoration: InputDecoration(
+                              hintText: fieldKey == 'phone' ? '03328904416' : null,
+                              hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                              isDense: true,
+                              contentPadding: EdgeInsets.zero,
+                              border: InputBorder.none,
+                            ),
+                            onSubmitted: (_) {
+                              if (fieldKey == 'phone') {
+                                final clean = controller.text.replaceAll(RegExp(r'[\s\-()]'), '');
+                                if (clean.isNotEmpty && !RegExp(r'^((\+92|92)?(0)?3[0-9]{9})$').hasMatch(clean)) {
+                                  _showSnack('Please enter a valid Pakistani phone number (e.g. 03328904416)', isError: true);
+                                  return;
+                                }
+                              }
+                              setState(() => _editingField = null);
+                            },
                           )
                         : Text(
-                            controller.text.isNotEmpty ? controller.text : 'Tap pencil to edit',
+                            controller.text.isNotEmpty ? controller.text : (fieldKey == 'phone' ? '03328904416' : 'Tap pencil to edit'),
                             style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: controller.text.isNotEmpty ? const Color(0xFF111827) : Colors.grey.shade400),
                           ),
                   ],
                 ),
               ),
               GestureDetector(
-                onTap: () => setState(() => _editingField = isEditing ? null : fieldKey),
+                onTap: () {
+                  if (isEditing && fieldKey == 'phone') {
+                    final clean = controller.text.replaceAll(RegExp(r'[\s\-()]'), '');
+                    if (clean.isNotEmpty && !RegExp(r'^((\+92|92)?(0)?3[0-9]{9})$').hasMatch(clean)) {
+                      _showSnack('Please enter a valid Pakistani phone number (e.g. 03328904416)', isError: true);
+                      return;
+                    }
+                  }
+                  setState(() => _editingField = isEditing ? null : fieldKey);
+                },
                 child: Icon(isEditing ? Icons.check_rounded : Icons.edit_outlined, color: const Color(0xFF1959F6), size: 20),
               ),
             ],

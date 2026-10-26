@@ -53,8 +53,11 @@ class _SignUpPageState extends State<SignUpPage> {
     if (value == null || value.trim().isEmpty) {
       return 'Phone number is required';
     }
-    final digitsOnly = value.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digitsOnly.length < 7) return 'Enter a valid phone number';
+    final clean = value.replaceAll(RegExp(r'[\s\-()]'), '');
+    final pakPhoneRegex = RegExp(r'^((\+92|92)?(0)?3[0-9]{9})$');
+    if (!pakPhoneRegex.hasMatch(clean)) {
+      return 'Enter a valid Pakistani number (e.g. 03328904416)';
+    }
     return null;
   }
 
@@ -94,9 +97,18 @@ class _SignUpPageState extends State<SignUpPage> {
 
     try {
       final email = _emailController.text.trim();
+      final rawPhone = _phoneController.text.replaceAll(RegExp(r'[\s\-()]'), '');
+      final formattedPhone = rawPhone.startsWith('+92')
+          ? '0${rawPhone.substring(3)}'
+          : (rawPhone.startsWith('92') && rawPhone.length == 12)
+              ? '0${rawPhone.substring(2)}'
+              : rawPhone.startsWith('3')
+                  ? '0$rawPhone'
+                  : rawPhone;
+
       final response = await AuthService.signup(
         fullName: _fullNameController.text.trim(),
-        phoneNumber: _phoneController.text.trim(),
+        phoneNumber: formattedPhone,
         countryCode: _countryCode,
         email: email,
         password: _passwordController.text,
@@ -432,7 +444,7 @@ class _SignUpPageState extends State<SignUpPage> {
                         controller: _phoneController,
                         keyboardType: TextInputType.phone,
                         textInputAction: TextInputAction.next,
-                        decoration: _inputDecoration(hint: '300 1234567', fill: fieldFill),
+                        decoration: _inputDecoration(hint: '03328904416', fill: fieldFill),
                         validator: _phoneValidator,
                       ),
                     ),

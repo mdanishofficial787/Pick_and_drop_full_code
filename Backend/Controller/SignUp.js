@@ -41,6 +41,16 @@ console.log("CONFIRM PASSWORD:", confirmPassword);
         }
 
 
+        // 2b. Pakistani Phone Number Validation
+        const cleanPhone = (PhoneNumber || "").toString().replace(/[\s\-()]/g, '');
+        const pakPhoneRegex = /^((\+92|92)?(0)?3[0-9]{9})$/;
+        if (!pakPhoneRegex.test(cleanPhone)) {
+            return res.status(400).json({
+                success: false,
+                message: "Please enter a valid Pakistani phone number (e.g. 03328904416)"
+            });
+        }
+
         // 3. Phone Duplicate Check
         const phoneExists = await Customer.findOne({
             PhoneNumber
@@ -293,19 +303,39 @@ module.exports.updateProfile = async (req, res) => {
       user.Email = cleanEmail;
     }
 
-    if (PhoneNumber && PhoneNumber.toString().trim() !== (user.PhoneNumber || "")) {
-      const cleanPhone = PhoneNumber.toString().trim();
-      const existingPhone = await Customer.findOne({
-        PhoneNumber: cleanPhone,
-        _id: { $ne: user._id }
-      });
-      if (existingPhone) {
+    if (PhoneNumber && PhoneNumber.toString().trim().length > 0) {
+      const cleanPhone = PhoneNumber.toString().replace(/[\s\-()]/g, "");
+      const pakPhoneRegex = /^((\+92|92)?(0)?3[0-9]{9})$/;
+      if (!pakPhoneRegex.test(cleanPhone)) {
         return res.status(400).json({
           success: false,
-          message: "Phone number is already registered with another account"
+          message: "Please enter a valid Pakistani phone number (e.g. 03328904416)"
         });
       }
-      user.PhoneNumber = cleanPhone;
+
+      let formattedPhone = cleanPhone;
+      if (formattedPhone.startsWith("+92")) {
+        formattedPhone = "0" + formattedPhone.slice(3);
+      } else if (formattedPhone.startsWith("92") && formattedPhone.length === 12) {
+        formattedPhone = "0" + formattedPhone.slice(2);
+      } else if (formattedPhone.startsWith("3")) {
+        formattedPhone = "0" + formattedPhone;
+      }
+
+      if (formattedPhone !== (user.PhoneNumber || "")) {
+        const existingPhone = await Customer.findOne({
+          PhoneNumber: formattedPhone,
+          _id: { $ne: user._id }
+        });
+        if (existingPhone) {
+          return res.status(400).json({
+            success: false,
+            message: "Phone number is already registered with another account"
+          });
+        }
+        user.PhoneNumber = formattedPhone;
+        user.countryCode = "+92";
+      }
     }
 
     if (req.file) {

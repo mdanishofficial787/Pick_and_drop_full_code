@@ -1,4 +1,4 @@
-﻿const mongoose = require("mongoose");
+const mongoose = require("mongoose");
 
 const customerSchema = new mongoose.Schema(
   {
@@ -9,14 +9,13 @@ const customerSchema = new mongoose.Schema(
     },
 
     PhoneNumber: {
-    type: String,
-    required: function () {
-        return this.SignupMethod === "Phone" ||
-               this.SignupMethod === "Email";
+      type: String,
+      required: function () {
+        return this.SignupMethod === "Phone";
+      },
+      unique: true,
+      sparse: true
     },
-    unique: true,
-    sparse: true
-},
 
     countryCode: {
       type: String,
@@ -31,57 +30,55 @@ const customerSchema = new mongoose.Schema(
       trim: true
     },
     googleId: {
-    type: String,
-    default: null
-},
+      type: String,
+      default: null
+    },
 
-SignupMethod: {
-    type: String,
-    enum: ["Phone", "Email", "Google"],
-    default: "Email"
-},
+    SignupMethod: {
+      type: String,
+      enum: ["Phone", "Email", "Google"],
+      default: "Email"
+    },
 
-   Password: {
-  type: String,
-  required: function () {
-    return this.SignupMethod === "Email";
-  }
-},
+    Password: {
+      type: String,
+      required: function () {
+        return this.SignupMethod === "Email";
+      }
+    },
   
-CustomerPhoto: {
+    CustomerPhoto: {
       url: {
         type: String,
         default: null
       },
-        public_id: {
+      public_id: {
         type: String,
         default: null
-    }
-     
+      }
     },
     isVerified: {
       type: Boolean,
       default: false
     },
     termsAccepted: {
-    accepted: {
+      accepted: {
         type: Boolean,
         default: true
-    },
-
-    version: {
+      },
+      version: {
         type: String,
         default: "1.0"
-    },
-
-    acceptedAt: {
+      },
+      acceptedAt: {
         type: Date,
         default: Date.now
+      }
     }
-}
   },
   {
     timestamps: true
   }
 );
+
 module.exports = mongoose.model("Customer", customerSchema);

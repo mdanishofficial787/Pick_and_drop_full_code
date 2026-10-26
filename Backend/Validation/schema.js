@@ -9,12 +9,18 @@ const signupSchema = Joi.object({
     }),
 
   PhoneNumber: Joi.string()
-    .length(11)
-    .pattern(/^[0-9]{11}$/)
+    .trim()
+    .custom((value, helpers) => {
+      const clean = value.replace(/[\s\-()]/g, '');
+      const pakPhoneRegex = /^((\+92|92)?(0)?3[0-9]{9})$/;
+      if (!pakPhoneRegex.test(clean)) {
+        return helpers.message("Please enter a valid Pakistani phone number (e.g. 03328904416)");
+      }
+      return clean;
+    })
     .required()
     .messages({
-      "string.length": "Phone number must be 11 digits",
-      "string.pattern.base": "Invalid phone number",
+      "string.empty": "Phone number is required",
       "any.required": "Phone number is required"
     }),
 
