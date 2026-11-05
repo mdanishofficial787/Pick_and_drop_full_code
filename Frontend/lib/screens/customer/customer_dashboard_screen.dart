@@ -384,6 +384,17 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
           seenInThisBatch.add(notifUniqueKey);
           notif['notifKey'] = notifUniqueKey;
 
+          // 0. Recency filter: ignore notifications older than 48 hours
+          final createdAtRaw = notif['createdAt'] ?? notif['time'];
+          if (createdAtRaw != null) {
+            try {
+              final parsedDate = DateTime.tryParse(createdAtRaw.toString());
+              if (parsedDate != null && DateTime.now().difference(parsedDate).inHours > 48) {
+                continue;
+              }
+            } catch (_) {}
+          }
+
           final bool isCustomerAccepted = notif['customerAccepted'] == true || status == 'CUSTOMER_ACCEPTED' || status == 'Customer Accepted';
           final bool isPaid = notif['isPaid'] == true ||
               notif['paymentStatus'] == 'Paid' ||

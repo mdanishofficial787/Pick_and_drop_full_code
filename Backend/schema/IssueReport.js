@@ -1,4 +1,4 @@
-﻿const mongoose = require("mongoose");
+const mongoose = require("mongoose");
 
 const issueReportSchema = new mongoose.Schema(
   {
@@ -27,14 +27,30 @@ const issueReportSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    mode: {
+      type: String,
+      default: "Separate",
+    },
+    issueType: {
+      type: String,
+      default: "Heavy Rain",
+    },
     reason: {
       type: String,
       required: true,
-      default: "Vehicle Issue",
+      default: "Heavy Rain",
+    },
+    message: {
+      type: String,
+      default: "",
     },
     details: {
       type: String,
       default: "",
+    },
+    passengers: {
+      type: Array,
+      default: [],
     },
     // Associated Customer and Trip details (if reported for a specific request)
     requestId: {

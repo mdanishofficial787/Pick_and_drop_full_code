@@ -202,7 +202,7 @@ class AuthService {
       final data = Map<String, dynamic>.from(response.data as Map);
       final rawCustomer = data['customer'] ?? data['user'];
       if (rawCustomer is Map) {
-        final user = CustomerUser.fromJson(Map<String, dynamic>.from(rawCustomer as Map));
+        final user = CustomerUser.fromJson(Map<String, dynamic>.from(rawCustomer));
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(_keyUser, user.toJsonString());
         debugPrint('checkSession updated stored user: ${user.fullName}, ${user.phoneNumber}, ${user.photoUrl}');
@@ -285,7 +285,7 @@ class AuthService {
         final data = Map<String, dynamic>.from(response.data as Map);
         final rawUser = data['customer'] ?? data['user'] ?? data['data'];
         if (rawUser is Map) {
-          final updatedUserJson = Map<String, dynamic>.from(rawUser as Map);
+          final updatedUserJson = Map<String, dynamic>.from(rawUser);
           final updatedUser = CustomerUser.fromJson(updatedUserJson);
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString(_keyUser, updatedUser.toJsonString());

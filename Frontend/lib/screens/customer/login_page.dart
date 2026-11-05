@@ -34,21 +34,8 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
-    String initPhone = widget.prefilledPhone ?? '';
-    if (initPhone.contains('3328904413')) {
-      initPhone = '03328904419';
-    }
-    if (initPhone.startsWith('+92')) {
-      _countryCode = '+92';
-      initPhone = '0${initPhone.substring(3)}';
-    } else if (initPhone.startsWith('92') && initPhone.length >= 12) {
-      _countryCode = '+92';
-      initPhone = '0${initPhone.substring(2)}';
-    } else if (RegExp(r'^3[0-9]{9}$').hasMatch(initPhone)) {
-      initPhone = '0$initPhone';
-    }
-    _phoneController = TextEditingController(text: initPhone);
-    _passwordController = TextEditingController(text: widget.prefilledPassword ?? '');
+    _phoneController = TextEditingController();
+    _passwordController = TextEditingController();
   }
 
   @override
@@ -240,9 +227,6 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_phoneController.text.contains('3328904413')) {
-      _phoneController.text = '03328904419';
-    }
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(

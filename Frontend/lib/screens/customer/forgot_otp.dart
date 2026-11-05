@@ -130,10 +130,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         final body = response.data as Map<String, dynamic>;
         final resetToken = body['resetToken'] as String?;
         final customer = body['customer'] as Map<String, dynamic>?;
-        final rawPhone = (customer?['phoneNumber'] as String?) ?? widget.prefilledPhone;
-        final phoneNumber = (rawPhone != null && rawPhone.contains('3328904413'))
-            ? '03328904419'
-            : rawPhone;
+        final phoneNumber = (customer?['phoneNumber'] as String?) ?? widget.prefilledPhone;
 
         if (resetToken == null) {
           ScaffoldMessenger.of(context).showSnackBar(

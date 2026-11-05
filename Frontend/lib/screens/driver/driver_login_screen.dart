@@ -22,6 +22,13 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   bool _isSubmitting = false;
 
   @override
+  void initState() {
+    super.initState();
+    _phoneController.clear();
+    _passwordController.clear();
+  }
+
+  @override
   void dispose() {
     _phoneController.dispose();
     _passwordController.dispose();
@@ -137,6 +144,10 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
         final keySuffix = driverId != null ? '_$driverId' : '';
         await prefs.setString('saved_driver_name$keySuffix', driverName);
         await prefs.setString('driver_name', driverName);
+        if (driverId != null && driverId.isNotEmpty) {
+          await prefs.setString('saved_driver_id$keySuffix', driverId);
+          await prefs.setString('driver_id', driverId);
+        }
         if (profilePic != null && profilePic.isNotEmpty) {
           await prefs.setString('saved_driver_photo$keySuffix', profilePic);
           await prefs.setString('driver_photo', profilePic);
@@ -270,6 +281,9 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                         child: TextFormField(
                           controller: _phoneController,
                           keyboardType: TextInputType.phone,
+                          enableSuggestions: false,
+                          autocorrect: false,
+                          autofillHints: null,
                           validator: (value) {
                             if (value == null || value.trim().isEmpty) {
                               return 'Required';
@@ -311,6 +325,9 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                 TextFormField(
                   controller: _passwordController,
                   obscureText: _obscurePassword,
+                  enableSuggestions: false,
+                  autocorrect: false,
+                  autofillHints: null,
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Required';

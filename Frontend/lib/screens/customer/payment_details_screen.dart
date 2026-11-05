@@ -245,6 +245,7 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
   }
 
   Widget _buildPaymentSummaryCard(String rideId, String fare) {
+    final cleanRideId = rideId.replaceAll(RegExp(r'_(completed|accepted|started|assigned)', caseSensitive: false), '');
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -254,16 +255,19 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
       child: Column(
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Ride ID: #$rideId',
-                style: GoogleFonts.inter(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF1E293B),
+              Expanded(
+                child: Text(
+                  'Ride ID: #$cleanRideId',
+                  style: GoogleFonts.inter(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF1E293B),
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
@@ -284,11 +288,14 @@ class _PaymentDetailsScreenState extends State<PaymentDetailsScreen> {
           const SizedBox(height: 8),
           Row(
             children: [
-              Text(
-                'Premium Business Ride • Dec 14 • 12.4 km',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: const Color(0xFF64748B),
+              Expanded(
+                child: Text(
+                  'Premium Business Ride • Dec 14 • 12.4 km',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: const Color(0xFF64748B),
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],

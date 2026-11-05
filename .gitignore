@@ -24,3 +24,5 @@ Frontend/android/app/release/
 .vscode/
 *.log
 .DS_Store
+
+scratch/

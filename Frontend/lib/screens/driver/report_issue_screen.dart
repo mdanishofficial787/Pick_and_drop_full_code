@@ -86,6 +86,10 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
 
   final List<Map<String, dynamic>> _issueTypes = [
     {
+      'title': 'Heavy Rain',
+      'icon': Icons.water_drop_rounded,
+    },
+    {
       'title': 'Vehicle Breakdowns',
       'icon': Icons.car_repair_rounded,
     },
@@ -246,6 +250,19 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                   widget.customerName!.isNotEmpty &&
                   name.toLowerCase() == widget.customerName!.toLowerCase());
 
+          bool canBePicked = true;
+          String reasonNote = '';
+          if (map['driverIssue'] != null && map['driverIssue'] is Map) {
+            final di = Map<String, dynamic>.from(map['driverIssue'] as Map);
+            if (di['canBePicked'] == false || (map['status'] ?? '').toString() == 'Driver Unavailable') {
+              canBePicked = false;
+            }
+            reasonNote = (di['reasonNote'] ?? di['reportedReason'] ?? di['issueType'] ?? '').toString();
+          } else if ((map['status'] ?? '').toString() == 'Driver Unavailable') {
+            canBePicked = false;
+            reasonNote = 'Driver Unavailable';
+          }
+
           items.add(
             _PassengerItem(
               id: id,
@@ -256,7 +273,8 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
               pickup: (map['pickupLocation'] is Map ? map['pickupLocation']['address'] : map['pickupLocation']?.toString()) ?? '',
               drop: (map['dropLocation'] is Map ? map['dropLocation']['address'] : map['dropLocation']?.toString()) ?? '',
               isSelected: widget.requestId != null ? isPreselected : true,
-              canBePicked: true,
+              canBePicked: canBePicked,
+              reasonNote: reasonNote,
             ),
           );
           seatCounter++;
@@ -330,13 +348,303 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
     });
   }
 
-  void _togglePassengerStatus(_PassengerItem p) {
-    setState(() {
-      p.canBePicked = !p.canBePicked;
-      if (!p.canBePicked && p.reasonNote.isEmpty) {
-        p.reasonNote = _selectedIssueType;
+  void _showPassengerIssueDialog(_PassengerItem p) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            final List<Map<String, dynamic>> reasons = [
+              {'title': 'Heavy Rain', 'icon': Icons.water_drop_rounded, 'color': const Color(0xFF0284C7)},
+              {'title': 'Vehicle Breakdowns', 'icon': Icons.car_repair_rounded, 'color': const Color(0xFFDC2626)},
+              {'title': 'Heavy Traffic', 'icon': Icons.directions_car_filled_rounded, 'color': const Color(0xFFD97706)},
+              {'title': 'Bad Weather', 'icon': Icons.cloud_queue_rounded, 'color': const Color(0xFF4B5563)},
+              {'title': 'Road Blockage', 'icon': Icons.alt_route_rounded, 'color': const Color(0xFFB45309)},
+              {'title': 'Passenger Issue', 'icon': Icons.person_add_alt_1_rounded, 'color': const Color(0xFF4338CA)},
+              {'title': 'Delay', 'icon': Icons.access_time_rounded, 'color': const Color(0xFF2563EB)},
+              {'title': 'Wrong Location', 'icon': Icons.location_on_rounded, 'color': const Color(0xFF7C3AED)},
+              {'title': 'Other', 'icon': Icons.more_horiz_rounded, 'color': const Color(0xFF6B7280)},
+            ];
+
+            return Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: EdgeInsets.fromLTRB(
+                20,
+                16,
+                20,
+                MediaQuery.of(ctx).viewInsets.bottom + 20,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFE0E7FF),
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          p.initials,
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFF1D4ED8),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              p.name,
+                              style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                            Text(
+                              '${p.seat} • Select issue reason',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.grey.shade500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Option to clear issue if currently cannot be picked
+                  if (!p.canBePicked) ...[
+                    InkWell(
+                      onTap: () {
+                        setState(() {
+                          p.canBePicked = true;
+                          p.reasonNote = '';
+                        });
+                        Navigator.pop(ctx);
+                        _savePassengerIssueToDb(p);
+                      },
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFECFDF5),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFA7F3D0), width: 1.2),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.check_circle_rounded, color: Color(0xFF059669), size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Mark as Can be picked (Clear Issue)',
+                                style: GoogleFonts.inter(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFF065F46),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+
+                  Text(
+                    'Choose Issue / Reason (Saves immediately to DB):',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Grid of issue options
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      crossAxisSpacing: 8,
+                      mainAxisSpacing: 8,
+                      childAspectRatio: 1.4,
+                    ),
+                    itemCount: reasons.length,
+                    itemBuilder: (_, idx) {
+                      final r = reasons[idx];
+                      final title = r['title'] as String;
+                      final icon = r['icon'] as IconData;
+                      final color = r['color'] as Color;
+                      final isCurrent = !p.canBePicked && p.reasonNote == title;
+
+                      return InkWell(
+                        onTap: () {
+                          setState(() {
+                            p.canBePicked = false;
+                            p.reasonNote = title;
+                          });
+                          Navigator.pop(ctx);
+                          _savePassengerIssueToDb(p);
+                        },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: isCurrent ? const Color(0xFFEFF6FF) : const Color(0xFFF9FAFB),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: isCurrent ? AppColors.primaryBlue : const Color(0xFFE5E7EB),
+                              width: isCurrent ? 1.5 : 1.0,
+                            ),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(icon, size: 20, color: color),
+                              const SizedBox(height: 4),
+                              Text(
+                                title,
+                                textAlign: TextAlign.center,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w600,
+                                  color: isCurrent ? AppColors.primaryBlue : const Color(0xFF374151),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _savePassengerIssueToDb(_PassengerItem p) async {
+    try {
+      final payload = {
+        'driverId': widget.driverId ?? '6a97ba8860eec88e497bd6c7',
+        'driverName': widget.driverName ?? 'Driver',
+        'mode': 'Separate',
+        'issueType': p.reasonNote.isNotEmpty ? p.reasonNote : _selectedIssueType,
+        'reason': p.reasonNote.isNotEmpty ? p.reasonNote : _selectedIssueType,
+        'reasonNote': p.reasonNote,
+        'passengerId': p.id,
+        'customerName': p.name,
+        'customerPhone': p.phone,
+        'canBePicked': p.canBePicked,
+        'passengers': [
+          {
+            'id': p.id,
+            'name': p.name,
+            'seat': p.seat,
+            'canBePicked': p.canBePicked,
+            'reasonNote': p.reasonNote,
+            'phone': p.phone,
+            'pickup': p.pickup,
+            'drop': p.drop,
+          }
+        ],
+      };
+
+      final res = await http.post(
+        Uri.parse(kReportIssueEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 6));
+
+      if (mounted) {
+        if (res.statusCode == 200 || res.statusCode == 201) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(
+                    p.canBePicked ? Icons.check_circle_rounded : Icons.info_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      p.canBePicked
+                          ? '${p.name} marked as Can be picked (Saved in DB)'
+                          : 'Saved in DB: ${p.reasonNote} for ${p.name}',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: p.canBePicked ? const Color(0xFF059669) : const Color(0xFF1E3A8A),
+              duration: const Duration(seconds: 2),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to save in DB: ${res.statusCode}'),
+              backgroundColor: const Color(0xFFDC2626),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       }
-    });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving in DB: $e'),
+            backgroundColor: const Color(0xFFDC2626),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _submitIssue() async {
@@ -366,37 +674,50 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
         'driverName': widget.driverName ?? 'Driver',
         'mode': _selectedMode == 0 ? 'Separate' : 'Combined',
         'issueType': _selectedIssueType,
+        'reason': _selectedIssueType,
         'message': _messageController.text.trim(),
+        'details': _messageController.text.trim(),
         'passengers': selectedPassengers.map((p) => {
               'id': p.id,
               'name': p.name,
               'seat': p.seat,
               'canBePicked': p.canBePicked,
-              'reasonNote': p.reasonNote,
+              'reasonNote': p.reasonNote.isNotEmpty ? p.reasonNote : _selectedIssueType,
+              'phone': p.phone,
+              'pickup': p.pickup,
+              'drop': p.drop,
             }).toList(),
         'timestamp': DateTime.now().toIso8601String(),
       };
 
-      try {
-        await http.post(
-          Uri.parse(kReportIssueEndpoint),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode(payload),
-        ).timeout(const Duration(seconds: 4));
-      } catch (_) {}
+      final response = await http.post(
+        Uri.parse(kReportIssueEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 8));
 
       if (mounted) {
         setState(() => _isSubmitting = false);
-        // Generate a random reference ID for display (or get it from response if available)
-        final refId = '#${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}';
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => ReportSuccessScreen(
-              issueType: _selectedIssueType,
-              referenceId: refId,
+
+        if (response.statusCode == 200 || response.statusCode == 201) {
+          final refId = '#${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}';
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => ReportSuccessScreen(
+                issueType: _selectedIssueType,
+                referenceId: refId,
+              ),
             ),
-          ),
-        );
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to submit: ${response.statusCode}'),
+              backgroundColor: const Color(0xFFDC2626),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -405,13 +726,12 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
           SnackBar(
             content: Text('Failed to submit: $e'),
             backgroundColor: const Color(0xFFDC2626),
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
     }
   }
-
-  
 
   @override
   Widget build(BuildContext context) {
@@ -855,7 +1175,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
 
                 // Status Badge (Can be picked / Cannot be picked)
                 InkWell(
-                  onTap: () => _togglePassengerStatus(p),
+                  onTap: () => _showPassengerIssueDialog(p),
                   borderRadius: BorderRadius.circular(20),
                   child: Container(
                     padding: const EdgeInsets.symmetric(

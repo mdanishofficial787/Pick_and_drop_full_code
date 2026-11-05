@@ -99,10 +99,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
 
       _socket?.on('customer-accepted-ride', (data) => _handleIncomingNotification(data));
       _socket?.on('driver-notification', (data) => _handleIncomingNotification(data));
-      _socket?.on('ride-accepted', (data) => _handleIncomingNotification(data));
-      _socket?.on('ride_accepted', (data) => _handleIncomingNotification(data));
+      _socket?.on('ride-dispatched', (data) {
+        if (data is Map) {
+          _handleIncomingNotification(data['notification'] ?? data['ride'] ?? data);
+        }
+      });
       _socket?.on('ride-updated', (data) {
-        if (data is Map && data['type'] == 'CUSTOMER_ACCEPTED') {
+        if (data is Map) {
           _handleIncomingNotification(data['notification'] ?? data['ride'] ?? data);
         }
       });
@@ -114,8 +117,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     try {
       final Map<String, dynamic> rawObj = Map<String, dynamic>.from(data is Map ? data : {});
       final String notifId = (rawObj['notificationId'] ?? rawObj['id'] ?? rawObj['rideId'] ?? '').toString();
-      final String targetDriver = (rawObj['driverId'] ?? '').toString();
-      final String targetDriverName = (rawObj['driverName'] ?? '').toString();
+      final String targetDriver = (rawObj['driverId'] ?? rawObj['assignedDriverId'] ?? '').toString();
+      final String targetDriverName = (rawObj['driverName'] ?? rawObj['assignedDriverName'] ?? '').toString();
 
       final myId = widget.driverId ?? '';
       final myName = currentDriverName.trim().toLowerCase();
@@ -123,10 +126,14 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       if (myId.isNotEmpty && targetDriver.isNotEmpty && targetDriver == myId) isForMe = true;
       final targetDriverCode = (rawObj['driverCode'] ?? rawObj['driverReferenceId'] ?? '').toString().trim().toLowerCase();
       if (myId.isNotEmpty && targetDriverCode.isNotEmpty && (targetDriverCode == myId.toLowerCase() || targetDriverCode == myName)) isForMe = true;
-      if (myId.isNotEmpty && targetDriver == myId) isForMe = true;
-      if (targetDriverName.isNotEmpty && (targetDriverName.toLowerCase() == myName || targetDriverName.toLowerCase().contains(myName))) isForMe = true;
+      if (myName.isNotEmpty && targetDriverName.isNotEmpty && (targetDriverName.toLowerCase() == myName || targetDriverName.toLowerCase().contains(myName))) isForMe = true;
 
       if (!isForMe) return;
+
+      final String status = (rawObj['status'] ?? '').toString().toUpperCase();
+      if (status == 'COMPLETED' || status == 'PAID' || status == 'CANCELLED' || status == 'REJECTED') {
+        return;
+      }
 
       final String notifKey = notifId.isNotEmpty ? notifId : 'driver_notif_${DateTime.now().millisecondsSinceEpoch}';
       if (_dismissedNotifIds.contains(notifKey)) return;
@@ -209,6 +216,12 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
             final type = (n['type'] ?? '').toString().toUpperCase();
             final title = (n['title'] ?? '').toString().toLowerCase();
 
+            // Exclude completed, paid, cancelled or rejected rides
+            final status = (n['status'] ?? '').toString().toUpperCase();
+            if (status == 'COMPLETED' || status == 'PAID' || status == 'CANCELLED' || status == 'REJECTED') {
+              return false;
+            }
+
             // Exclude route matching notifications (Route Matching feature removed)
             if (type.contains('ROUTE') || title.contains('route match') || title.contains('route setup')) {
               return false;
@@ -268,7 +281,10 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         http.post(
           Uri.parse(ApiConstants.dismissDriverNotification(targetId)),
           headers: {'Content-Type': 'application/json'},
-          body: json.encode({'driverId': widget.driverId}),
+          body: json.encode({
+            'driverId': widget.driverId,
+            'driverName': currentDriverName,
+          }),
         ).catchError((_) => http.Response('{}', 500));
       }
     } catch (_) {}
@@ -308,7 +324,10 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       http.post(
         Uri.parse(ApiConstants.clearAllDriverNotifications),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({'driverId': widget.driverId}),
+        body: json.encode({
+          'driverId': widget.driverId,
+          'driverName': currentDriverName,
+        }),
       ).catchError((_) => http.Response('{}', 500));
     } catch (_) {}
 
@@ -1266,6 +1285,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                                     filterPrefix: 'REQ-',
                                                     moduleName:
                                                         'Monthly Pick & Drop',
+                                                    initialTabIndex: 0,
                                                   ),
                                             ),
                                           );

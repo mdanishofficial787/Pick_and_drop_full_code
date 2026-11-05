@@ -609,13 +609,14 @@ class _RouteMatchSetupScreenState extends State<RouteMatchSetupScreen> {
         ),
         padding: const EdgeInsets.all(16),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
                         child: Text(
@@ -629,7 +630,7 @@ class _RouteMatchSetupScreenState extends State<RouteMatchSetupScreen> {
                       ),
                       if (isAccepted)
                         Container(
-                          margin: const EdgeInsets.only(left: 6),
+                          margin: const EdgeInsets.only(left: 6, top: 1),
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: const Color(0xFFDCFCE7),
@@ -649,71 +650,80 @@ class _RouteMatchSetupScreenState extends State<RouteMatchSetupScreen> {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      Icon(Icons.access_time, size: 16, color: Colors.grey[600]),
+                      Icon(Icons.access_time, size: 15, color: Colors.grey[600]),
                       const SizedBox(width: 4),
-                      Text(
-                        timeRange,
-                        style: GoogleFonts.inter(
-                          fontSize: 13,
-                          color: Colors.grey[600],
+                      Flexible(
+                        child: Text(
+                          timeRange,
+                          style: GoogleFonts.inter(
+                            fontSize: 12.5,
+                            color: Colors.grey[600],
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Text(
-                        '$count customer requests',
-                        style: GoogleFonts.inter(
-                          fontSize: 13,
-                          color: Colors.grey[600],
+                  const SizedBox(height: 6),
+                  Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: '$count customer requests',
+                          style: GoogleFonts.inter(
+                            fontSize: 12.5,
+                            color: Colors.grey[600],
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        '• Tap to view & accept',
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: const Color(0xFF007BFF),
+                        TextSpan(
+                          text: ' • Tap to view & accept',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF007BFF),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            Column(
-              children: [
-                InkWell(
-                  onTap: () => _togglePreferred(index),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: isPreferred ? Colors.transparent : Colors.grey[300]!,
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 82,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  InkWell(
+                    onTap: () => _togglePreferred(index),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isPreferred ? Colors.transparent : Colors.grey[300]!,
+                        ),
+                      ),
+                      child: Icon(
+                        isPreferred ? Icons.star : Icons.star_border,
+                        color: isPreferred ? const Color(0xFF007BFF) : Colors.grey[400],
+                        size: 26,
                       ),
                     ),
-                    child: Icon(
-                      isPreferred ? Icons.star : Icons.star_border,
-                      color: isPreferred ? const Color(0xFF007BFF) : Colors.grey[400],
-                      size: 28,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Mark as Preferred',
+                    style: GoogleFonts.inter(
+                      fontSize: 9.5,
+                      color: Colors.grey[600],
                     ),
+                    textAlign: TextAlign.center,
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Mark as Preferred',
-                  style: GoogleFonts.inter(
-                    fontSize: 10,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),

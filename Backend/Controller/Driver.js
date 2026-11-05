@@ -483,18 +483,24 @@ const saveAvailability = async (req, res) => {
 };
 
 const IssueReport = require("../schema/IssueReport");
+const RideRequest = require("../schema/RideRequest");
+const CustomerNotification = require("../schema/CustomerNotification");
 const mongoose = require("mongoose");
 
 const reportIssue = async (req, res) => {
   try {
     const {
       driverId,
-      fromDate,
-      toDate,
-      fromTime,
-      toTime,
+      driverName: inputDriverName,
+      mode = "Separate",
+      issueType,
       reason,
+      message,
       details,
+      passengers = [],
+      passengerId,
+      canBePicked,
+      reasonNote,
       requestId,
       customerName,
       customerPhone,
@@ -502,18 +508,50 @@ const reportIssue = async (req, res) => {
       dropoffLocation,
       fare,
       rideId,
+      fromDate,
+      toDate,
+      fromTime,
+      toTime,
     } = req.body;
-    let driverName = "Driver";
-    let driverObjId = null;
 
-    if (driverId && mongoose.Types.ObjectId.isValid(driverId)) {
-      driverObjId = driverId;
-      const driver = await Driver.findById(driverId).select("Name PhoneNumber Email driverReferenceId").lean();
-      if (driver) {
-        driverName = driver.Name || "Driver";
+    const finalReason = (issueType || reasonNote || reason || "Heavy Rain").trim();
+    const finalDetails = (message || details || reasonNote || "").trim();
+
+    // 1. Resolve Driver
+    let driverObjId = null;
+    let driverName = inputDriverName || "Driver";
+    if (driverId) {
+      if (mongoose.Types.ObjectId.isValid(driverId)) {
+        driverObjId = driverId;
+        const d = await Driver.findById(driverId).select("Name PhoneNumber Email driverReferenceId").lean();
+        if (d && d.Name) driverName = d.Name;
+      } else {
+        const d = await Driver.findOne({
+          $or: [
+            { driverReferenceId: driverId },
+            { PhoneNumber: driverId },
+            { Name: new RegExp("^" + driverId.trim() + "$", "i") }
+          ]
+        }).lean();
+        if (d) {
+          driverObjId = d._id;
+          if (d.Name) driverName = d.Name;
+        }
       }
     }
 
+    // 2. Prepare passengers list
+    let passengersList = Array.isArray(passengers) ? [...passengers] : [];
+    if (passengerId && passengersList.length === 0) {
+      passengersList.push({
+        id: passengerId,
+        name: customerName || "Passenger",
+        canBePicked: canBePicked !== false,
+        reasonNote: reasonNote || finalReason
+      });
+    }
+
+    // 3. Save IssueReport document
     let rideObjId = null;
     if (rideId && mongoose.Types.ObjectId.isValid(rideId)) {
       rideObjId = rideId;
@@ -521,36 +559,159 @@ const reportIssue = async (req, res) => {
 
     const newIssue = new IssueReport({
       driver: driverObjId,
-      driverName: req.body.driverName || driverName,
-      fromDate: fromDate ? new Date(fromDate) : new Date(),
-      toDate: toDate ? new Date(toDate) : new Date(),
-      fromTime: fromTime || "",
-      toTime: toTime || "",
-      reason: reason || "Vehicle Issue",
-      details: details || "",
-      requestId: requestId || "",
-      customerName: customerName || "",
+      driverName: driverName,
+      mode: mode,
+      issueType: finalReason,
+      reason: finalReason,
+      message: finalDetails,
+      details: finalDetails,
+      passengers: passengersList,
+      requestId: requestId || (passengersList.length > 0 ? passengersList[0].id : ""),
+      customerName: customerName || (passengersList.length > 0 ? passengersList[0].name : ""),
       customerPhone: customerPhone || "",
       pickupLocation: pickupLocation || "",
       dropoffLocation: dropoffLocation || "",
       fare: fare || "",
       ride: rideObjId,
       status: "Pending",
+      fromDate: fromDate ? new Date(fromDate) : new Date(),
+      toDate: toDate ? new Date(toDate) : new Date(),
+      fromTime: fromTime || "",
+      toTime: toTime || "",
     });
 
     await newIssue.save();
 
-    // Broadcast via socket.io to admin
+    // 4. Update RideRequest documents in DB for affected passengers
+    const updatedRideIds = [];
+    if (passengersList.length > 0) {
+      for (const p of passengersList) {
+        const pId = p.id || p.rideId || p.requestId;
+        const pReason = p.reasonNote || finalReason;
+        const pCanBePicked = p.canBePicked !== false;
+
+        const driverIssueData = {
+          issueType: finalReason,
+          reportedReason: pReason,
+          reasonNote: pReason,
+          additionalDetails: finalDetails,
+          canBePicked: pCanBePicked,
+          driverId: driverId || (driverObjId ? driverObjId.toString() : ""),
+          driverName: driverName,
+          mode: mode,
+          reportedAt: new Date(),
+          issueReportId: newIssue._id
+        };
+
+        const updateSet = {
+          driverIssue: driverIssueData
+        };
+
+        if (!pCanBePicked) {
+          updateSet.status = "Driver Unavailable";
+        }
+
+        let updatedRide = null;
+        if (pId) {
+          const idQuery = [];
+          if (mongoose.Types.ObjectId.isValid(pId)) {
+            idQuery.push({ _id: new mongoose.Types.ObjectId(pId) });
+          }
+          idQuery.push({ requestId: pId });
+          updatedRide = await RideRequest.findOneAndUpdate(
+            { $or: idQuery },
+            { $set: updateSet },
+            { returnDocument: 'after' }
+          );
+        }
+
+        if (!updatedRide && p.name) {
+          updatedRide = await RideRequest.findOneAndUpdate(
+            { passengerName: new RegExp("^" + p.name.trim() + "$", "i") },
+            { $set: updateSet },
+            { returnDocument: 'after' }
+          );
+        }
+
+        if (updatedRide) {
+          updatedRideIds.push(updatedRide.requestId || updatedRide._id.toString());
+
+          // Create customer notification if driver is unavailable
+          if (!pCanBePicked) {
+            const custId = updatedRide.customerId;
+            await CustomerNotification.create({
+              customerId: custId || null,
+              userId: custId || null,
+              driverId: driverObjId || driverId || null,
+              driverName: driverName,
+              passengerName: updatedRide.passengerName,
+              passengerPhone: updatedRide.passengerPhone,
+              rideId: updatedRide.requestId || updatedRide._id.toString(),
+              requestId: updatedRide.requestId || updatedRide._id.toString(),
+              type: "DRIVER_UNAVAILABLE",
+              title: "Driver Unavailable",
+              subtitle: "Your assigned driver reported: " + pReason + ". Replacement requested.",
+              reason: pReason,
+              reportedReason: pReason,
+              additionalDetails: finalDetails || pReason,
+              details: finalDetails || pReason,
+              status: "UNAVAILABLE",
+              canRequestReplacement: true,
+              replacementRequested: false
+            }).catch(() => {});
+          }
+        }
+      }
+    } else if (requestId || rideId) {
+      const targetRideId = requestId || rideId;
+      const queryOr = [];
+      if (mongoose.Types.ObjectId.isValid(targetRideId)) {
+        queryOr.push({ _id: new mongoose.Types.ObjectId(targetRideId) });
+      }
+      queryOr.push({ requestId: targetRideId });
+
+      await RideRequest.updateMany(
+        { $or: queryOr },
+        {
+          $set: {
+            status: "Driver Unavailable",
+            driverIssue: {
+              issueType: finalReason,
+              reportedReason: finalReason,
+              reasonNote: finalReason,
+              additionalDetails: finalDetails,
+              canBePicked: false,
+              driverId: driverId || (driverObjId ? driverObjId.toString() : ""),
+              driverName: driverName,
+              reportedAt: new Date(),
+              issueReportId: newIssue._id
+            }
+          }
+        }
+      );
+      updatedRideIds.push(targetRideId);
+    }
+
+    // 5. Broadcast real-time socket events
     const io = req.app.get("io");
     if (io) {
       io.emit("new_issue_report", newIssue);
       io.emit("admin_issue_reported", newIssue);
+      io.emit("driver-issue-reported", {
+        issueId: newIssue._id,
+        driverId,
+        driverName,
+        issueType: finalReason,
+        passengers: passengersList,
+        updatedRideIds
+      });
     }
 
-    return res.status(201).json({
+    return res.status(200).json({
       success: true,
-      message: "Issue reported to admin successfully",
+      message: "Issue reported and saved successfully",
       issue: newIssue,
+      updatedRideIds
     });
   } catch (error) {
     console.error("Report Issue Error:", error);

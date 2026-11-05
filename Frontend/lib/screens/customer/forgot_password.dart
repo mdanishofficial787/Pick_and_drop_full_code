@@ -45,10 +45,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             ? response.data as Map<String, dynamic>
             : <String, dynamic>{};
         final resolvedEmail = data['email']?.toString() ?? email;
-        final rawResolvedPhone = data['phoneNumber']?.toString();
-        final resolvedPhone = (rawResolvedPhone != null && rawResolvedPhone.contains('3328904413'))
-            ? '03328904419'
-            : rawResolvedPhone;
+        final resolvedPhone = data['phoneNumber']?.toString();
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

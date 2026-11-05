@@ -531,7 +531,6 @@ class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
                   Expanded(
                     child: _buildSelectablePill(
                       label: 'One Way',
-                      icon: Icons.radio_button_checked_rounded,
                       isSelected: _tripType == 'One Way',
                       onTap: () => setState(() => _tripType = 'One Way'),
                     ),
@@ -540,7 +539,6 @@ class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
                   Expanded(
                     child: _buildSelectablePill(
                       label: 'Two Way',
-                      icon: Icons.radio_button_unchecked_rounded,
                       isSelected: _tripType == 'Two Way',
                       onTap: () => setState(() => _tripType = 'Two Way'),
                     ),
@@ -1083,10 +1081,11 @@ class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
                     ],
                   ),
                 ),
+              ],
 
-                const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-                // Enter Fare Card
+              // Enter Fare Card
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -1162,7 +1161,6 @@ class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
                     ],
                   ),
                 ),
-              ],
 
               const SizedBox(height: 24),
 

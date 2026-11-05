@@ -4,7 +4,8 @@ import '/theme/app_theme.dart';
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'driver_dashboard_screen.dart';
+import 'driver_login_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
   final String resetToken;
@@ -85,42 +86,38 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       if (!mounted) return;
 
       if (response.statusCode == 200) {
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove('driver_id');
+          await prefs.remove('driver_name');
+          await prefs.remove('driver_photo');
+          await prefs.remove('saved_driver_name');
+          await prefs.remove('saved_driver_id');
+          await prefs.remove('saved_driver_photo');
+        } catch (_) {}
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Password reset successful! Logging you in...'),
+          SnackBar(
+            content: Text(
+              'Password reset successfully! Please log in with your credentials.',
+              style: GoogleFonts.inter(fontSize: 13, color: Colors.white),
+            ),
+            backgroundColor: const Color(0xFF15803D),
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
         );
 
-        final responseBody = jsonDecode(response.body);
-        final driverData =
-            responseBody['driver'] ??
-            responseBody['data'] ??
-            responseBody['user'] ??
-            responseBody;
-        final String driverName =
-            driverData['Name'] ?? driverData['name'] ?? 'Driver';
-        final String? driverId =
-            driverData['_id']?.toString() ?? driverData['id']?.toString();
-        String? extractUrl(dynamic field) {
-          if (field == null) return null;
-          if (field is String) return field;
-          if (field is Map) return field['url']?.toString();
-          return field.toString();
-        }
-
-        final String? profilePic = extractUrl(driverData['profilePic']) ??
-            extractUrl(driverData['driverPhoto']);
-
-        // Navigate directly to the Driver Dashboard
+        // Navigate cleanly to DriverLoginScreen
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
-            builder: (_) => DriverDashboardScreen(
-              driverName: driverName,
-              driverId: driverId,
-              profilePic: profilePic,
-            ),
+            builder: (_) => const DriverLoginScreen(),
           ),
-          (route) => false, // Remove all previous routes
+          (route) => false,
         );
       } else {
         String msg = 'Failed to reset password';

@@ -60,10 +60,13 @@ router.post("/:id/request-replacement", requestReplacementDriver);
 // Admin & Dispatch Console
 router.get("/", getAllRides);
 router.get("/dispatch-console", getAllRides);
+router.get("/driver/:driverId", getAllRides);
 router.get("/:id", getRideById);
 router.patch("/:id/dispatch", dispatchRide);
 router.post("/:id/dispatch", dispatchRide);
 router.patch("/:id", updateRide);
 router.put("/:id", updateRide);
+router.patch("/status/:id", updateRide);
+router.put("/status/:id", updateRide);
 
 module.exports = router;

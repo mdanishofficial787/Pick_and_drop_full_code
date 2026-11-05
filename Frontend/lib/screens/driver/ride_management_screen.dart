@@ -814,6 +814,19 @@ class _RideManagementScreenState extends State<RideManagementScreen>
     });
   }
 
+  bool _matchesFilterPrefix(String reqId, [String? rideId]) {
+    final prefix = widget.filterPrefix;
+    if (prefix == null || prefix.isEmpty) return true;
+    final r = reqId.trim().toUpperCase();
+    final p = prefix.trim().toUpperCase();
+    if (p == 'REQ-') {
+      if (r.startsWith('REQ-') || r.startsWith('RPL-')) return true;
+      if (rideId != null && rideId.trim().toUpperCase().startsWith('REQ-')) return true;
+      return false;
+    }
+    return r.startsWith(p);
+  }
+
   Future<void> _fetchRides({bool silent = false}) async {
     if (widget.driverId == null) return;
     if (!silent && _allRidesCache.isEmpty) {
@@ -841,9 +854,12 @@ class _RideManagementScreenState extends State<RideManagementScreen>
           ? widget.driverId!
           : '';
 
-      // 1. Primary: GET /api/rides?status=assigned
+      // 1. Primary: GET /api/rides?status=assigned (with driverId & driverName)
       try {
-        final uri = Uri.parse('$kBaseUrl/api/rides?status=assigned');
+        final queryParams = <String, String>{'status': 'assigned'};
+        if (activeDriverId.isNotEmpty) queryParams['driverId'] = activeDriverId;
+        if (widget.driverName.isNotEmpty) queryParams['driverName'] = widget.driverName;
+        final uri = Uri.parse('$kBaseUrl/api/rides').replace(queryParameters: queryParams);
         final response = await http
             .get(uri)
             .timeout(const Duration(seconds: 12));
@@ -910,11 +926,15 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         } catch (_) {}
       }
 
-      // 3. Fallback: GET /api/rides
+      // 3. Fallback: GET /api/rides with driver filter
       if (combinedRawList.isEmpty) {
         try {
+          final queryParams = <String, String>{};
+          if (activeDriverId.isNotEmpty) queryParams['driverId'] = activeDriverId;
+          if (widget.driverName.isNotEmpty) queryParams['driverName'] = widget.driverName;
+          final uri = Uri.parse('$kBaseUrl/api/rides').replace(queryParameters: queryParams);
           final response = await http
-              .get(Uri.parse('$kBaseUrl/api/rides'))
+              .get(uri)
               .timeout(const Duration(seconds: 12));
           if (response.statusCode == 200) {
             final body = jsonDecode(response.body);
@@ -955,7 +975,7 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         }
       }
 
-      // Filter array to only display trips belonging to this logged-in driver
+      // Filter array to strictly display trips belonging to this logged-in driver
       final knownDriverNames = {
         if (widget.driverName.isNotEmpty)
           widget.driverName.trim().toLowerCase(),
@@ -973,31 +993,29 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         final reqId = (ride['requestId'] ?? ride['id'] ?? ride['_id'] ?? '')
             .toString();
 
-        if (widget.filterPrefix != null && widget.filterPrefix!.isNotEmpty) {
-          if (!reqId.startsWith(widget.filterPrefix!)) return false;
+        final rRideId = (ride['rideId'] ?? '').toString();
+        if (!_matchesFilterPrefix(reqId, rRideId)) {
+          return false;
         }
 
-        if (reqId.isNotEmpty && _socketReceivedRideIds.contains(reqId)) {
-          return true;
+        String asgDriver = '';
+        String asgDriverId = '';
+        if (ride['assignedDriver'] is Map) {
+          asgDriver = (ride['assignedDriver']['name'] ?? '').toString().trim().toLowerCase();
+          asgDriverId = (ride['assignedDriver']['driverId'] ?? ride['assignedDriver']['driverCode'] ?? '').toString().trim().toLowerCase();
+        } else {
+          asgDriver = (ride['assignedDriver'] ?? ride['assignedDriverName'] ?? '').toString().trim().toLowerCase();
         }
-
-        final asgDriver =
-            (ride['assignedDriver'] ?? ride['assignedDriverName'] ?? '')
-                .toString()
-                .trim()
-                .toLowerCase();
-        final asgDriverName = (ride['assignedDriverName'] ?? '')
-            .toString()
-            .trim()
-            .toLowerCase();
-        final asgDriverId =
-            (ride['assignedDriverId'] ??
-                    ride['driverId'] ??
-                    ride['driver'] ??
-                    '')
-                .toString()
-                .trim()
-                .toLowerCase();
+        final asgDriverName = (ride['assignedDriverName'] ?? '').toString().trim().toLowerCase();
+        if (asgDriverId.isEmpty) {
+          asgDriverId = (ride['assignedDriverId'] ??
+                  ride['driverId'] ??
+                  ride['driver'] ??
+                  '')
+              .toString()
+              .trim()
+              .toLowerCase();
+        }
         final rideDriverId = (ride['driverId'] ?? '')
             .toString()
             .trim()
@@ -1034,6 +1052,28 @@ class _RideManagementScreenState extends State<RideManagementScreen>
                       rideDriver.contains(k) ||
                       k.contains(rideDriver))),
         );
+
+        // Strict rejection: if ride is assigned to another driver ID, reject
+        if (knownDriverIds.isNotEmpty && asgDriverId.isNotEmpty) {
+          final isForMe = knownDriverIds.any((k) =>
+              asgDriverId == k || asgDriverId.contains(k) || k.contains(asgDriverId));
+          if (!isForMe) return false;
+        }
+
+        // Strict rejection: if ride is assigned to another driver Name, reject
+        if (knownDriverNames.isNotEmpty && asgDriver.isNotEmpty) {
+          final isForMeName = knownDriverNames.any((k) =>
+              asgDriver == k || asgDriver.contains(k) || k.contains(asgDriver));
+          if (!isForMeName) return false;
+        }
+
+        if (reqId.isNotEmpty && _socketReceivedRideIds.contains(reqId)) {
+          // If socket received, still enforce driver match
+          if (knownDriverIds.isNotEmpty || knownDriverNames.isNotEmpty) {
+            return driverNameMatch || driverIdMatch;
+          }
+          return true;
+        }
 
         return driverNameMatch || driverIdMatch;
       }).toList();
@@ -1132,13 +1172,10 @@ class _RideManagementScreenState extends State<RideManagementScreen>
 
           // Ensure any locally accepted rides are included in the list
           for (final localRide in _locallyAcceptedRides.values) {
-            if (widget.filterPrefix != null &&
-                widget.filterPrefix!.isNotEmpty) {
-              final rId = localRide.requestId.isNotEmpty
-                  ? localRide.requestId
-                  : localRide.id;
-              if (!rId.startsWith(widget.filterPrefix!)) continue;
-            }
+            final rId = localRide.requestId.isNotEmpty
+                ? localRide.requestId
+                : localRide.id;
+            if (!_matchesFilterPrefix(rId)) continue;
 
             final exists = processedRides.any(
               (r) =>
@@ -1273,12 +1310,10 @@ class _RideManagementScreenState extends State<RideManagementScreen>
         );
         // 3. Add to the top of assigned rides
         bool shouldAdd = true;
-        if (widget.filterPrefix != null && widget.filterPrefix!.isNotEmpty) {
-          final rId = acceptedRide.requestId.isNotEmpty
-              ? acceptedRide.requestId
-              : acceptedRide.id;
-          if (!rId.startsWith(widget.filterPrefix!)) shouldAdd = false;
-        }
+        final rId = acceptedRide.requestId.isNotEmpty
+            ? acceptedRide.requestId
+            : acceptedRide.id;
+        if (!_matchesFilterPrefix(rId)) shouldAdd = false;
         if (shouldAdd) {
           _assignedRides.insert(0, acceptedRide);
         }
@@ -1331,12 +1366,10 @@ class _RideManagementScreenState extends State<RideManagementScreen>
           _assignedRides[idx] = startedRide;
         } else {
           bool shouldAdd = true;
-          if (widget.filterPrefix != null && widget.filterPrefix!.isNotEmpty) {
-            final rId = startedRide.requestId.isNotEmpty
-                ? startedRide.requestId
-                : startedRide.id;
-            if (!rId.startsWith(widget.filterPrefix!)) shouldAdd = false;
-          }
+          final rId = startedRide.requestId.isNotEmpty
+              ? startedRide.requestId
+              : startedRide.id;
+          if (!_matchesFilterPrefix(rId)) shouldAdd = false;
           if (shouldAdd) {
             _assignedRides.insert(0, startedRide);
           }

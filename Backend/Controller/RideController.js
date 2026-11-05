@@ -157,34 +157,60 @@ exports.createMonthlyRide = async (req, res) => {
 // 2. Get All Rides (For Admin Dispatch Console & Live Trips)
 exports.getAllRides = async (req, res) => {
   try {
-    const { status, search } = req.query;
+    const { status, search, driverName } = req.query;
+    const driverId = req.params.driverId || req.query.driverId;
     let query = {};
 
     if (status) {
       if (status.toLowerCase() === "pending") {
         query.status = "Pending Dispatch";
       } else if (status.toLowerCase() === "assigned") {
-        query.status = "ASSIGNED";
+        query.status = { $in: ["ASSIGNED", "Assigned", "assigned", "Awaiting Driver Acceptance", "Dispatched"] };
       } else {
         query.status = status;
       }
     }
 
-    if (req.query.driverId) {
-      query.$or = [
-        { assignedDriverId: req.query.driverId },
-        { assignedDriverId: new RegExp(req.query.driverId, "i") }
-      ];
+    if (driverId || driverName) {
+      const orConditions = [];
+      if (driverId) {
+        orConditions.push({ assignedDriverId: driverId });
+        orConditions.push({ driverId: driverId });
+        orConditions.push({ driver: driverId });
+        orConditions.push({ assignedDriverCode: driverId });
+        orConditions.push({ "assignedDriverDetails.driverId": driverId });
+        orConditions.push({ "assignedDriverDetails.driverCode": driverId });
+        orConditions.push({ assignedDriverId: new RegExp('^' + driverId + '$', 'i') });
+        try {
+          if (mongoose.Types.ObjectId.isValid(driverId)) {
+            const objId = new mongoose.Types.ObjectId(driverId);
+            orConditions.push({ assignedDriverId: objId });
+            orConditions.push({ driverId: objId });
+            orConditions.push({ driver: objId });
+          }
+        } catch (_) {}
+      }
+      if (driverName) {
+        orConditions.push({ assignedDriverName: new RegExp('^' + driverName.trim() + '$', 'i') });
+        orConditions.push({ "assignedDriverDetails.name": new RegExp('^' + driverName.trim() + '$', 'i') });
+      }
+      query.$or = orConditions;
     }
 
     if (search) {
-      query.$or = [
+      const searchConds = [
         { requestId: { $regex: search, $options: "i" } },
         { passengerName: { $regex: search, $options: "i" } },
         { passengerPhone: { $regex: search, $options: "i" } },
         { pickupLocation: { $regex: search, $options: "i" } },
         { dropoffLocation: { $regex: search, $options: "i" } }
       ];
+      if (query.$or) {
+        query.$and = [{ $or: query.$or }, { $or: searchConds }];
+        delete query.$or;
+      } else {
+        query.$or = searchConds;
+      }
     }
 
     const rides = await RideRequest.find(query).sort({ createdAt: -1 }).lean();
@@ -253,9 +279,106 @@ exports.getAllRides = async (req, res) => {
       createdAt: ride.createdAt
     }));
 
+    // Fetch replacement requests if available and merge into formattedRides
+    try {
+      const rplCol = mongoose.connection.db.collection("replacementrequests");
+      let rplQuery = {};
+      if (query.status) {
+        rplQuery.status = query.status;
+      }
+      if (driverId) {
+        const rplOr = [
+          { "assignedDriver.driverId": driverId },
+          { "assignedDriver.driverCode": driverId },
+          { assignedDriverId: driverId },
+          { driverId: driverId }
+        ];
+        if (mongoose.Types.ObjectId.isValid(driverId)) {
+          rplOr.push({ "assignedDriver.driverId": new mongoose.Types.ObjectId(driverId) });
+        }
+        rplQuery.$or = rplOr;
+      }
+      if (driverName) {
+        const nameReg = new RegExp('^' + driverName.trim() + '$', "i");
+        if (rplQuery.$or) {
+          rplQuery.$or.push({ "assignedDriver.name": nameReg });
+        } else {
+          rplQuery.$or = [{ "assignedDriver.name": nameReg }];
+        }
+      }
+      const replacementDocs = await rplCol.find(rplQuery).sort({ createdAt: -1 }).toArray();
+
+      for (const rpl of replacementDocs) {
+        const rplReqId = rpl.requestId || "";
+        const rplRideId = rpl.rideId || rplReqId;
+        const alreadyIncluded = formattedRides.some(r => r.requestId === rplRideId || r.requestId === rplReqId || r._id === rplReqId);
+        if (!alreadyIncluded) {
+          const dObj = rpl.assignedDriver || {};
+          formattedRides.unshift({
+            _id: rplReqId || (rpl._id ? rpl._id.toString() : ""),
+            id: rplReqId || (rpl._id ? rpl._id.toString() : ""),
+            mongoId: rpl._id ? rpl._id.toString() : rplReqId,
+            requestId: rplReqId,
+            rideId: rplRideId,
+            passengerName: rpl.clientName || rpl.passengerName || "Customer",
+            passengerPhone: rpl.clientPhone || rpl.passengerPhone || "",
+            passengerEmail: rpl.passengerEmail || "",
+            passenger: {
+              name: rpl.clientName || rpl.passengerName || "Customer",
+              phone: rpl.clientPhone || rpl.passengerPhone || "",
+              email: rpl.passengerEmail || ""
+            },
+            pickupLocation: rpl.pickupLocation || rpl.pickup || "Pickup Location",
+            dropoffLocation: rpl.dropoffLocation || rpl.dropoff || "Drop-off Location",
+            route: {
+              pickup: rpl.pickupLocation || rpl.pickup || "Pickup Location",
+              dropoff: rpl.dropoffLocation || rpl.dropoff || "Drop-off Location",
+              summary: `${rpl.pickupLocation || "Pickup"} -> ${rpl.dropoffLocation || "Drop-off"}`,
+              passengers: 1
+            },
+            scheduledTime: rpl.timeSlot || rpl.scheduledTime || rpl.timeToReach || "08:00 AM",
+            timeToReach: rpl.timeSlot || "08:00 AM",
+            timeToLeave: "",
+            startingFrom: rpl.scheduledDate || rpl.startingFrom || new Date().toISOString().split("T")[0],
+            scheduleType: "Monthly Replacement",
+            scheduleTime: rpl.timeSlot || "08:00 AM",
+            customSchedule: {},
+            selectedDays: "Mon - Sat",
+            vehicle: {
+              type: dObj.vehicle || "Sedan",
+              seating: "Standard",
+              selection: "Separate",
+              ac: dObj.ac ? "AC" : "Non-AC",
+              label: `${dObj.vehicle || "Sedan"} • ${dObj.ac ? "AC" : "Non-AC"}`
+            },
+            vehicleType: dObj.vehicle || "Sedan",
+            acPreference: dObj.ac ? "AC" : "Non-AC",
+            tripType: "One Way",
+            genderPreference: "Both",
+            vehicleTypeSelection: "Separate",
+            seatingArrangement: "Standard",
+            passengersCount: 1,
+            fare: rpl.fare || 0,
+            fareFormatted: rpl.fareFormatted || `Rs. ${(rpl.fare || 0).toLocaleString()}`,
+            notes: rpl.reason || "",
+            cnic: "",
+            status: rpl.status || "ASSIGNED",
+            statusLabel: rpl.status || "ASSIGNED",
+            isPending: false,
+            isAssigned: true,
+            assignedDriver: dObj.name || "",
+            assignedDriverName: dObj.name || "",
+            assignedDriverId: dObj.driverId || "",
+            driverId: dObj.driverId || "",
+            createdAt: rpl.createdAt || new Date()
+          });
+        }
+      }
+    } catch (_) {}
+
     return res.status(200).json({
       success: true,
-      count: rides.length,
+      count: formattedRides.length,
       pendingCount,
       assignedCount,
       data: formattedRides,
@@ -341,16 +464,72 @@ exports.dispatchRide = async (req, res) => {
       {
         status: "ASSIGNED",
         assignedDriverId: driverId || null,
-        assignedDriverName: assignedName || "Assigned Driver"
+        driverId: driverId || null,
+        driver: driverId || null,
+        assignedDriverName: assignedName || "Assigned Driver",
+        assignedDriver: assignedName || "Assigned Driver"
       },
       { returnDocument: 'after', new: true }
     );
+
+    // Also sync replacement request if one exists for this ride
+    try {
+      await mongoose.connection.db.collection("replacementrequests").updateMany(
+        { $or: [{ rideId: existingRide.requestId }, { requestId: existingRide.requestId }] },
+        {
+          $set: {
+            status: "ASSIGNED",
+            "assignedDriver.driverId": driverId || "",
+            "assignedDriver.name": assignedName || "Assigned Driver",
+            "assignedDriver.assignedAt": new Date().toISOString()
+          }
+        }
+      );
+    } catch (_) {}
 
     if (!updatedRide) {
       return res.status(404).json({
         success: false,
         message: "Ride request not found after update"
       });
+    }
+
+    // Persist DriverNotification for Dispatched Ride
+    try {
+      const driverNotif = {
+        driverId: driverId || "",
+        driverName: assignedName || "Assigned Driver",
+        driverReferenceId: driverId || "",
+        rideId: updatedRide.requestId,
+        requestId: updatedRide.requestId,
+        mongoId: updatedRide._id ? updatedRide._id.toString() : updatedRide.requestId,
+        notificationId: `${updatedRide.requestId}_ASSIGNED`,
+        title: "🚗 New Ride Dispatched!",
+        subtitle: `Admin assigned ride ${updatedRide.requestId} (${updatedRide.passengerName || "Customer"}) to you. Tap to view ride details.`,
+        status: "ASSIGNED",
+        type: "RIDE_ASSIGNED",
+        customerName: updatedRide.passengerName || "Customer",
+        customerPhone: updatedRide.passengerPhone || "",
+        pickup: updatedRide.pickupLocation || "Pickup Point",
+        destination: updatedRide.dropoffLocation || "Destination Point",
+        fareFormatted: updatedRide.fare ? `Rs. ${Number(updatedRide.fare).toLocaleString()}` : "Rs. 9,500",
+        isRead: false,
+        isDismissed: false
+      };
+      await DriverNotification.findOneAndUpdate(
+        { notificationId: `${updatedRide.requestId}_ASSIGNED` },
+        driverNotif,
+        { upsert: true, new: true }
+      );
+      const io = req.app.get("io");
+      if (io) {
+        io.emit("driver-notification", driverNotif);
+        if (driverId) io.to(driverId.toString()).emit("driver-notification", driverNotif);
+        io.emit("ride-dispatched", { ride: updatedRide, notification: driverNotif });
+        io.emit("ride-updated", { type: "RIDE_DISPATCHED", ride: updatedRide, notification: driverNotif });
+      }
+    } catch (driverNotifErr) {
+      console.warn("Failed saving driver notification for dispatched ride:", driverNotifErr.message);
     }
 
     // Persist CustomerNotification for Driver Assigned
@@ -646,7 +825,6 @@ exports.updateRide = async (req, res) => {
           ).catch(() => {});
         } catch (_) {}
       }
-      }
     }
 
     // Emit Real-time Socket.IO events
@@ -681,18 +859,6 @@ exports.updateRide = async (req, res) => {
         if (custPhone) io.to(`customer_${custPhone}`).emit("ride-updated", notifyPayload);
         if (drvId) io.to(`driver_${drvId}`).emit("ride-updated", notifyPayload);
         io.to(`ride_${rId}`).emit("ride-updated", notifyPayload);
-
-
-
-
-
-        }
-
-
-
-
-        }
-
       }
     } catch (socketErr) {
       console.warn("Socket emit error:", socketErr.message);
@@ -1907,11 +2073,16 @@ exports.getDriverNotifications = async (req, res) => {
       queryConds.push({ driverId: driverId });
       queryConds.push({ driverReferenceId: driverId });
       driverMatchRides.push({ assignedDriverId: driverId });
-      driverMatchRides.push({ assignedDriverId: new RegExp(`^${driverId}$`, "i") });
+      driverMatchRides.push({ driverId: driverId });
+      driverMatchRides.push({ driver: driverId });
+      driverMatchRides.push({ assignedDriverId: new RegExp('^' + driverId + '$', "i") });
       driverMatchRides.push({ "assignedDriverDetails.driverId": driverId });
+      driverMatchRides.push({ "assignedDriver.driverId": driverId });
       if (mongoose.Types.ObjectId.isValid(driverId)) {
         queryConds.push({ driverId: new mongoose.Types.ObjectId(driverId) });
         driverMatchRides.push({ assignedDriverId: new mongoose.Types.ObjectId(driverId) });
+        driverMatchRides.push({ driverId: new mongoose.Types.ObjectId(driverId) });
+        driverMatchRides.push({ driver: new mongoose.Types.ObjectId(driverId) });
       }
     }
 
