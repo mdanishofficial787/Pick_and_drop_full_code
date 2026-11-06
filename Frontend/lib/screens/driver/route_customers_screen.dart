@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../constants/api_constants.dart';
 
 class RouteCustomersScreen extends StatefulWidget {
@@ -27,6 +28,35 @@ class _RouteCustomersScreenState extends State<RouteCustomersScreen> {
   late List<dynamic> _customers;
   bool _isAccepting = false;
   bool _isAccepted = false;
+  String _driverName = '';
+  String _driverPhone = '';
+  String _driverCode = '';
+  String _driverVehicle = '';
+  String _driverPlate = '';
+
+  Future<void> _loadDriverInfo() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keySuffix = widget.driverId != null ? '_${widget.driverId}' : '';
+      final savedName = prefs.getString('saved_driver_name$keySuffix') ?? prefs.getString('driver_name');
+      final savedPhone = prefs.getString('saved_driver_phone$keySuffix') ?? prefs.getString('driver_phone');
+      final savedCode = prefs.getString('saved_driver_code$keySuffix') ?? prefs.getString('driver_code') ?? prefs.getString('saved_driver_id$keySuffix') ?? prefs.getString('driver_id');
+      final savedVehicle = prefs.getString('saved_driver_vehicle$keySuffix') ?? prefs.getString('driver_vehicle');
+      final savedPlate = prefs.getString('saved_driver_plate$keySuffix') ?? prefs.getString('driver_plate');
+
+      if (mounted) {
+        setState(() {
+          _driverName = (widget.driverName.isNotEmpty && widget.driverName != 'Arbab')
+              ? widget.driverName
+              : (savedName != null && savedName.isNotEmpty ? savedName : widget.driverName);
+          _driverPhone = (savedPhone != null && savedPhone.isNotEmpty) ? savedPhone : '+92 300 9876543';
+          _driverCode = (savedCode != null && savedCode.isNotEmpty) ? savedCode : (widget.driverId ?? 'DRV-1001');
+          _driverVehicle = (savedVehicle != null && savedVehicle.isNotEmpty) ? savedVehicle : 'Honda Accord (Super White)';
+          _driverPlate = (savedPlate != null && savedPlate.isNotEmpty) ? savedPlate : 'ISB-0009';
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   void initState() {
@@ -34,6 +64,7 @@ class _RouteCustomersScreenState extends State<RouteCustomersScreen> {
     _currentRoute = Map<String, dynamic>.from(widget.route);
     _customers = List<dynamic>.from(_currentRoute['customers'] ?? []);
     _isAccepted = _currentRoute['status'] == 'ACCEPTED';
+    _loadDriverInfo();
   }
 
   int _calculateTotalFare() {
@@ -62,15 +93,27 @@ class _RouteCustomersScreenState extends State<RouteCustomersScreen> {
     });
 
     try {
-      final routeId = _currentRoute['routeId'] ?? _currentRoute['routeName'] ?? 'ROUTE-B';
+      final routeId = _currentRoute['routeId'] ?? _currentRoute['_id'] ?? _currentRoute['routeName'] ?? 'ROUTE-B';
       final response = await http
           .post(
             Uri.parse(ApiConstants.acceptRoute),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({
               'routeId': routeId,
-              'driverId': widget.driverId ?? 'DRV-1001',
-              'driverName': widget.driverName.isNotEmpty ? widget.driverName : 'Arbab',
+              'driverId': widget.driverId ?? (_driverCode.isNotEmpty ? _driverCode : 'DRV-1001'),
+              'driverName': _driverName.isNotEmpty ? _driverName : (widget.driverName.isNotEmpty ? widget.driverName : 'Arbab'),
+              'driverPhone': _driverPhone.isNotEmpty ? _driverPhone : '+92 300 9876543',
+              'driverCode': _driverCode.isNotEmpty ? _driverCode : 'DRV-1001',
+              'vehicle': _driverVehicle.isNotEmpty ? _driverVehicle : 'Honda Accord (Super White)',
+              'driverVehicle': _driverVehicle.isNotEmpty ? _driverVehicle : 'Honda Accord (Super White)',
+              'numberPlate': _driverPlate.isNotEmpty ? _driverPlate : 'ISB-0009',
+              'registrationNumber': _driverPlate.isNotEmpty ? _driverPlate : 'ISB-0009',
+              'rating': '⭐ 4.9 (Verified Driver)',
+              'routeName': _currentRoute['routeName'],
+              'pickupPoint': _currentRoute['pickupPoint'],
+              'dropoffPoint': _currentRoute['dropoffPoint'],
+              'timeRange': _currentRoute['timeRange'],
+              'customers': _customers,
             }),
           )
           .timeout(const Duration(seconds: 8));

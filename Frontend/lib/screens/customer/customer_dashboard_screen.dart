@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:ride_and_serve/constants/api_constants.dart';
 import 'package:ride_and_serve/constants/app_colors.dart';
@@ -101,8 +102,18 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       _socket?.onConnect((_) {
         if (customerId.isNotEmpty) {
           _socket?.emit('join-customer', customerId);
-          if (_currentUser?.phoneNumber != null) {
-            _socket?.emit('join-customer', _currentUser!.phoneNumber);
+        }
+        if (_currentUser?.phoneNumber != null && _currentUser!.phoneNumber!.isNotEmpty) {
+          final rawPhone = _currentUser!.phoneNumber!;
+          final digits = rawPhone.replaceAll(RegExp(r'[^0-9]'), '');
+          final core = digits.length >= 9 ? digits.substring(digits.length - 9) : digits;
+          _socket?.emit('join-customer', rawPhone);
+          _socket?.emit('join-customer', digits);
+          if (core.isNotEmpty) {
+            _socket?.emit('join-customer', core);
+            _socket?.emit('join-customer', '0$core');
+            _socket?.emit('join-customer', '+92$core');
+            _socket?.emit('join-customer', '+92 $core');
           }
         }
       });
@@ -154,6 +165,8 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
 
       _socket?.on('ride_accepted', (data) => _handleRideAcceptedSocket(data));
       _socket?.on('ride-accepted', (data) => _handleRideAcceptedSocket(data));
+      _socket?.on('customer-notification', (data) => _handleRideAcceptedSocket(data));
+      _socket?.on('customer_notification', (data) => _handleRideAcceptedSocket(data));
     } catch (_) {}
   }
 
@@ -174,10 +187,21 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       final currentUserPhone = _currentUser?.phoneNumber ?? '';
       final currentUserEmail = _currentUser?.email ?? '';
 
+      bool isPhoneMatch(String p1, String p2) {
+        if (p1.isEmpty || p2.isEmpty) return false;
+        final d1 = p1.replaceAll(RegExp(r'[^0-9]'), '');
+        final d2 = p2.replaceAll(RegExp(r'[^0-9]'), '');
+        if (d1.isEmpty || d2.isEmpty) return false;
+        if (d1 == d2) return true;
+        final c1 = d1.length >= 9 ? d1.substring(d1.length - 9) : d1;
+        final c2 = d2.length >= 9 ? d2.substring(d2.length - 9) : d2;
+        return c1 == c2;
+      }
+
       bool matchesUser = false;
-      if (currentUserId.isNotEmpty && customerId == currentUserId) matchesUser = true;
-      if (currentUserPhone.isNotEmpty && passengerPhone == currentUserPhone) matchesUser = true;
-      if (currentUserEmail.isNotEmpty && passengerEmail == currentUserEmail) matchesUser = true;
+      if (currentUserId.isNotEmpty && customerId.isNotEmpty && customerId == currentUserId) matchesUser = true;
+      if (currentUserPhone.isNotEmpty && passengerPhone.isNotEmpty && isPhoneMatch(passengerPhone, currentUserPhone)) matchesUser = true;
+      if (currentUserEmail.isNotEmpty && passengerEmail.isNotEmpty && currentUserEmail.toLowerCase().trim() == passengerEmail.toLowerCase().trim()) matchesUser = true;
 
       if (!matchesUser && payloadId.isNotEmpty) {
         matchesUser = _notifications.any((n) =>
@@ -191,21 +215,88 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
         if (!_seenRideStatusIds.contains(statusKey)) {
           _seenRideStatusIds.add(statusKey);
 
-          final driverDetails = rideObj['driverDetails'] ?? rideObj['driver'] ?? {};
-          final driverName = driverDetails['name'] ?? 'A driver';
-          final driverVehicle = driverDetails['vehicle'] ?? 'their vehicle';
+          final driverDetails = rideObj['driverDetails'] is Map
+              ? Map<String, dynamic>.from(rideObj['driverDetails'])
+              : (rideObj['driver'] is Map
+                  ? Map<String, dynamic>.from(rideObj['driver'])
+                  : <String, dynamic>{});
 
+          final driverName = (driverDetails['name'] ??
+                  driverDetails['driverName'] ??
+                  rideObj['driverName'] ??
+                  rawPayload['driverName'] ??
+                  'Arbab')
+              .toString();
+
+          final driverPhone = (driverDetails['phone'] ??
+                  driverDetails['phoneNumber'] ??
+                  rideObj['driverPhone'] ??
+                  rawPayload['driverPhone'] ??
+                  '+92 300 9876543')
+              .toString();
+
+          final driverCode = (driverDetails['driverCode'] ??
+                  driverDetails['driverReferenceId'] ??
+                  rideObj['driverCode'] ??
+                  rawPayload['driverCode'] ??
+                  'DRV-1001')
+              .toString();
+
+          final driverRating = (driverDetails['rating'] ??
+                  rideObj['rating'] ??
+                  rawPayload['rating'] ??
+                  '⭐ 4.9 (Verified Driver)')
+              .toString();
+
+          final driverVehicle = (driverDetails['vehicle'] ??
+                  rideObj['vehicle'] ??
+                  rawPayload['vehicle'] ??
+                  'Honda Accord (Super White)')
+              .toString();
+
+          final driverPlate = (driverDetails['registrationNumber'] ??
+                  driverDetails['numberPlate'] ??
+                  rideObj['numberPlate'] ??
+                  rawPayload['numberPlate'] ??
+                  'ISB-0009')
+              .toString();
+
+          final pickupLocation = (rideObj['pickup'] ??
+                  rideObj['pickupLocation'] ??
+                  rawPayload['pickup'] ??
+                  'Pickup Point')
+              .toString();
+
+          final dropoffLocation = (rideObj['destination'] ??
+                  rideObj['dropoffLocation'] ??
+                  rawPayload['destination'] ??
+                  'Destination Point')
+              .toString();
+
+          final fareFormatted = (rideObj['fareFormatted'] ??
+                  rawPayload['fareFormatted'] ??
+                  (rideObj['fare'] != null ? 'Rs. ${rideObj['fare']}' : null) ??
+                  'Rs. 9,500')
+              .toString();
           final notifObj = {
+            'driverName': driverName,
+            'driverPhone': driverPhone,
+            'driverCode': driverCode,
+            'rating': driverRating,
+            'vehicle': driverVehicle,
+            'numberPlate': driverPlate,
+            'fareFormatted': fareFormatted,
+            'fare': rideObj['fare'] ?? rawPayload['fare'],
             'id': payloadId,
-            'title': '🚗 Driver Assigned!',
+            'title': rideObj['title'] ?? rawPayload['title'] ?? '🚗 Driver Assigned!',
             'subtitle': '$driverName is on their way with $driverVehicle.',
-            'time': 'Just Now',
+            'time': rideObj['time'] ?? 'Just Now',
             'status': 'ACCEPTED',
             'requestId': payloadId,
             'rideId': payloadId,
             'driverDetails': driverDetails,
-            'pickup': rideObj['pickupLocation'] ?? 'Pickup Point',
-            'destination': rideObj['dropoffLocation'] ?? 'Destination Point',
+            'pickup': pickupLocation,
+            'destination': dropoffLocation,
             'isRead': false,
           };
 
@@ -251,6 +342,11 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       if (matchesUser || (customerId.isEmpty && passengerPhone.isEmpty && currentUserPhone.isEmpty)) {
         final rawFare = rideObj['fareFormatted'] ?? (rideObj['fare'] != null ? 'Rs. ${formatNumberCustom(rideObj['fare'])}' : null);
         final String status = (rideObj['status'] ?? '').toString();
+
+        if (status == 'ACCEPTED' || status == 'Accepted') {
+          _handleRideAcceptedSocket(data);
+          return;
+        }
 
         if (status == 'PAID' || status == 'Paid') {
           setState(() {
@@ -976,6 +1072,88 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
         builder: (context, setDialogState) {
           final isAccepted = notif['customerAccepted'] == true || notif['status'] == 'CUSTOMER_ACCEPTED';
 
+          final driverDetails = notif['driverDetails'] is Map
+              ? Map<String, dynamic>.from(notif['driverDetails'])
+              : <String, dynamic>{};
+
+          final String driverName = (notif['driverName'] ??
+                  driverDetails['name'] ??
+                  driverDetails['driverName'] ??
+                  'Arbab')
+              .toString()
+              .trim();
+          final displayDriverName =
+              driverName.isNotEmpty ? driverName : 'Assigned Driver';
+
+          final String rawPhone = (notif['driverPhone'] ??
+                  driverDetails['phone'] ??
+                  driverDetails['phoneNumber'] ??
+                  '+92 300 9876543')
+              .toString()
+              .trim();
+          final String driverPhone =
+              rawPhone.isNotEmpty ? rawPhone : '+92 300 9876543';
+
+          final String driverCode = (notif['driverCode'] ??
+                  driverDetails['driverCode'] ??
+                  driverDetails['driverReferenceId'] ??
+                  'DRV-1001')
+              .toString()
+              .trim();
+
+          final String vehicle = (notif['vehicle'] ??
+                  driverDetails['vehicle'] ??
+                  driverDetails['vehicleMake'] ??
+                  'Honda Accord (Super White)')
+              .toString()
+              .trim();
+
+          final String numberPlate = (notif['numberPlate'] ??
+                  driverDetails['registrationNumber'] ??
+                  driverDetails['numberPlate'] ??
+                  'ISB-0009')
+              .toString()
+              .trim();
+
+          final String rating = (notif['rating'] ??
+                  driverDetails['rating'] ??
+                  '⭐ 4.9 (Verified Driver)')
+              .toString()
+              .trim();
+
+          final String fare = (notif['fareFormatted'] ??
+                  (notif['fare'] != null ? 'Rs. ${notif['fare']}' : null) ??
+                  'Rs. 9,500')
+              .toString()
+              .trim();
+
+          final String pickup = (notif['pickup'] ??
+                  notif['pickupLocation'] ??
+                  'Pickup Point')
+              .toString()
+              .trim();
+
+          final String destination = (notif['destination'] ??
+                  notif['dropoffLocation'] ??
+                  'Destination Point')
+              .toString()
+              .trim();
+
+          final String reqId = (notif['requestId'] ??
+                  notif['rideId'] ??
+                  notif['id'] ??
+                  'REQ-8052')
+              .toString()
+              .trim();
+
+          final String driverPhoto = (notif['driverPhoto'] ??
+                  driverDetails['photo'] ??
+                  driverDetails['driverPhoto'] ??
+                  driverDetails['profilePic'] ??
+                  '')
+              .toString()
+              .trim();
+
           return Dialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
             insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
@@ -1003,7 +1181,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Request ID: ${notif['requestId']}',
+                      'Request ID: $reqId',
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _primaryBlue),
                     ),
 
@@ -1023,17 +1201,20 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                         children: [
                           Row(
                             children: [
-                              if (_currentUser?.photoUrl != null && _currentUser!.photoUrl!.isNotEmpty)
+                              if (driverPhoto.isNotEmpty)
                                 CircleAvatar(
                                   radius: 28,
                                   backgroundColor: Colors.transparent,
-                                  backgroundImage: NetworkImage(_currentUser!.photoUrl!.startsWith('http') ? _currentUser!.photoUrl! : '${ApiConstants.baseUrl}/${_currentUser!.photoUrl!.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '')}'),
+                                  backgroundImage: NetworkImage(driverPhoto.startsWith('http') ? driverPhoto : '${ApiConstants.baseUrl}/${driverPhoto.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '')}'),
                                 )
                               else
                                 CircleAvatar(
                                   radius: 28,
-                                  backgroundColor: _primaryBlue.withValues(alpha: 0.1),
-                                  child: const Icon(Icons.person_rounded, color: _primaryBlue, size: 32),
+                                  backgroundColor: _primaryBlue.withValues(alpha: 0.12),
+                                  child: Text(
+                                    displayDriverName.isNotEmpty ? displayDriverName[0].toUpperCase() : 'D',
+                                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: _primaryBlue),
+                                  ),
                                 ),
                               const SizedBox(width: 14),
                               Expanded(
@@ -1041,13 +1222,68 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      notif['driverName'] ?? 'Assigned Driver',
+                                      displayDriverName,
                                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
                                     ),
                                     const SizedBox(height: 3),
-                                    Text(
-                                      notif['driverPhone'] != null && notif['driverPhone'].toString().isNotEmpty ? notif['driverPhone'].toString() : 'Verified Driver',
-                                      style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                                    InkWell(
+                                      onTap: () {
+                                        Clipboard.setData(ClipboardData(text: driverPhone));
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Row(
+                                              children: [
+                                                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text('Copied $driverPhone to clipboard!'),
+                                                ),
+                                              ],
+                                            ),
+                                            backgroundColor: const Color(0xFF0F172A),
+                                            behavior: SnackBarBehavior.floating,
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                            duration: const Duration(seconds: 2),
+                                          ),
+                                        );
+                                      },
+                                      borderRadius: BorderRadius.circular(6),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.phone_rounded, size: 14, color: _primaryBlue),
+                                            const SizedBox(width: 4),
+                                            Flexible(
+                                              child: Text(
+                                                driverPhone,
+                                                style: const TextStyle(fontSize: 13, color: Color(0xFF475569), fontWeight: FontWeight.w600),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: _primaryBlue.withValues(alpha: 0.1),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: const Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(Icons.copy_rounded, size: 11, color: _primaryBlue),
+                                                  SizedBox(width: 3),
+                                                  Text(
+                                                    'Copy',
+                                                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: _primaryBlue),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     ),
                                     const SizedBox(height: 4),
                                     Container(
@@ -1057,7 +1293,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                                         borderRadius: BorderRadius.circular(6),
                                       ),
                                       child: Text(
-                                        notif['rating'] ?? '⭐ 4.9 (Verified Driver)',
+                                        rating,
                                         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD97706)),
                                       ),
                                     ),
@@ -1070,11 +1306,11 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                           const Divider(height: 1, color: Color(0xFFCBD5E1)),
                           const SizedBox(height: 12),
 
-                          _DetailRow(icon: Icons.badge_outlined, label: 'Driver Code', value: notif['driverCode'] ?? 'DRV-1788328584103-ECAP0L'),
+                          _DetailRow(icon: Icons.badge_outlined, label: 'Driver Code', value: driverCode),
                           const SizedBox(height: 8),
-                          _DetailRow(icon: Icons.directions_car_outlined, label: 'Vehicle', value: notif['vehicle'] ?? 'Honda Accord (Super White)'),
+                          _DetailRow(icon: Icons.directions_car_outlined, label: 'Vehicle', value: vehicle),
                           const SizedBox(height: 8),
-                          _DetailRow(icon: Icons.numbers_rounded, label: 'Number Plate', value: notif['numberPlate'] ?? 'ISB-0009'),
+                          _DetailRow(icon: Icons.numbers_rounded, label: 'Number Plate', value: numberPlate),
                         ],
                       ),
                     ),
@@ -1096,7 +1332,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                             children: [
                               const Text('Agreed Fare', style: TextStyle(fontSize: 13, color: Color(0xFF475569), fontWeight: FontWeight.w500)),
                               Text(
-                                notif['fareFormatted'] ?? 'Rs. 9,500',
+                                fare,
                                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _primaryBlue),
                               ),
                             ],
@@ -1109,7 +1345,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  notif['pickup'] ?? '',
+                                  pickup,
                                   style: const TextStyle(fontSize: 12, color: Color(0xFF334155)),
                                   maxLines: 2,
                                 ),
@@ -1124,7 +1360,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  notif['destination'] ?? '',
+                                  destination,
                                   style: const TextStyle(fontSize: 12, color: Color(0xFF334155)),
                                   maxLines: 2,
                                 ),

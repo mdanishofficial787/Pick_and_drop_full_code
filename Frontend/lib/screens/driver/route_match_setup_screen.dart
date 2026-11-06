@@ -579,7 +579,7 @@ class _RouteMatchSetupScreenState extends State<RouteMatchSetupScreen> {
     required int index,
     required Map<String, dynamic> route,
   }) {
-    final routeName = route['routeName'] ?? 'Route ${String.fromCharCode(65 + index)}';
+    final rawRouteName = (route['routeName'] ?? 'Route ${String.fromCharCode(65 + index)}').toString().trim(); final bool hasRouteArrow = rawRouteName.contains('→') || rawRouteName.contains('➔') || rawRouteName.contains('->'); final bool isGenericRoute = RegExp(r'^route\s+[a-z0-9]+$', caseSensitive: false).hasMatch(rawRouteName); final String displayCardTitle = (isGenericRoute && (route['pickupPoint'] ?? 'Pickup Point') != 'Pickup Point') ? '$rawRouteName: ${route['pickupPoint']} → ${route['dropoffPoint']}' : (hasRouteArrow ? rawRouteName : '${route['pickupPoint'] ?? 'Pickup Point'} → ${route['dropoffPoint'] ?? 'Drop Point'}');
     final pickupPoint = route['pickupPoint'] ?? 'Pickup Point';
     final dropoffPoint = route['dropoffPoint'] ?? 'Drop Point';
     final timeRange = route['timeRange'] ?? '7:00 AM - 9:00 AM';
@@ -620,7 +620,7 @@ class _RouteMatchSetupScreenState extends State<RouteMatchSetupScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          '$routeName: $pickupPoint → $dropoffPoint',
+                          displayCardTitle,
                           style: GoogleFonts.inter(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
