@@ -74,7 +74,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     setState(() => _isLoading = true);
     try {
       final response = await http.post(
-        Uri.parse('http://localhost:3000/password/reset-password'),
+        Uri.parse('https://pick-and-drop-full-code.vercel.app/password/reset-password'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'resetToken': widget.resetToken,

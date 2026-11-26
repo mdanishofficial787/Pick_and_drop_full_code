@@ -18,6 +18,9 @@ const {
     exportVehiclesCSV,
     getPendingPasswordResets,
     updatePasswordResetStatus,
+    getAllIssueReports,
+    getIssueReportById,
+    updateIssueReportStatus,
 } = require("../Controller/Admincontroller");
 
 // All routes below require a valid admin JWT (Authorization: Bearer <token>)
@@ -42,5 +45,10 @@ router.patch("/vehicle/:id/verification", updateVehicleVerificationStatus);
 // PASSWORD RESET ROUTES
 router.get("/password-resets/pending", getPendingPasswordResets);
 router.patch("/password-resets/:id/status", updatePasswordResetStatus);
+
+// ISSUE REPORT ROUTES
+router.get("/issue-reports", getAllIssueReports);
+router.get("/issue-reports/:id", getIssueReportById);
+router.patch("/issue-reports/:id/status", updateIssueReportStatus);
 
 module.exports = router;

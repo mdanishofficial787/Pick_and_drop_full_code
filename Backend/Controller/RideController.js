@@ -34,7 +34,14 @@ exports.createMonthlyRide = async (req, res) => {
       genderPreference
     } = req.body;
 
-    if (!passengerName || !passengerPhone || !pickupLocation || !dropoffLocation || !startingFrom) {
+    const resolvedName = (passengerName || req.body.name || req.body.customerName || "Customer User").toString().trim();
+    const resolvedPhone = (passengerPhone || req.body.phone || req.body.customerPhone || "+923001234567").toString().trim();
+    const resolvedEmail = (passengerEmail || req.body.email || req.body.customerEmail || "").toString().trim().toLowerCase();
+    const resolvedPickup = (pickupLocation || req.body.pickup || req.body.from || "").toString().trim();
+    const resolvedDropoff = (dropoffLocation || req.body.dropoff || req.body.to || "").toString().trim();
+    const resolvedStartingFrom = (startingFrom || req.body.startDate || req.body.date || req.body.travelDate || new Date().toISOString().split("T")[0]).toString().trim();
+
+    if (!resolvedName || !resolvedPhone || !resolvedPickup || !resolvedDropoff || !resolvedStartingFrom) {
       return res.status(400).json({
         success: false,
         message: "Please provide all required ride details (Name, Phone, Pickup, Drop-off, Starting Date)"
@@ -42,19 +49,19 @@ exports.createMonthlyRide = async (req, res) => {
     }
 
     const newRide = new RideRequest({
-      customerId: customerId || null,
-      passengerName: passengerName.trim(),
-      passengerPhone: passengerPhone.trim(),
-      passengerEmail: passengerEmail ? passengerEmail.trim().toLowerCase() : null,
-      pickupLocation: pickupLocation.trim(),
-      dropoffLocation: dropoffLocation.trim(),
-      startingFrom: startingFrom.trim(),
+      customerId: customerId || req.body.userId || null,
+      passengerName: resolvedName,
+      passengerPhone: resolvedPhone,
+      passengerEmail: resolvedEmail || null,
+      pickupLocation: resolvedPickup,
+      dropoffLocation: resolvedDropoff,
+      startingFrom: resolvedStartingFrom,
       timeToReach: timeToReach || "08:30 AM",
       timeToLeave: timeToLeave || "05:00 PM",
-      scheduleType: scheduleType || "Mon - Fri",
-      scheduleTime: scheduleTime || "9:00 AM",
+      scheduleType: scheduleType || req.body.schedulePreset || "Mon - Fri",
+      scheduleTime: scheduleTime || timeToReach || "08:30 AM",
       customSchedule: customSchedule || {},
-      vehicleTypeSelection: vehicleTypeSelection || "Separate",
+      vehicleTypeSelection: vehicleTypeSelection || req.body.serviceType || "Separate",
       seatingArrangement: seatingArrangement || "Sedan Executive",
       vehicleType: vehicleType || "Sedan",
       acPreference: acPreference || "AC",
@@ -64,13 +71,29 @@ exports.createMonthlyRide = async (req, res) => {
         : (customSchedule && !isNaN(Number(customSchedule.fare)) && Number(customSchedule.fare) > 0
             ? Number(customSchedule.fare)
             : ((tripType === "Two Way" || (customSchedule && customSchedule.tripType === "Two Way")) ? 12000 : 9500)),
-      notes: notes || "",
+      notes: notes || req.body.instructions || "",
       tripType: tripType || customSchedule?.tripType || "One Way",
-      genderPreference: genderPreference || "Both",
-      status: "Pending Dispatch"
+      genderPreference: genderPreference || customSchedule?.genderPreference || "Both",
+      status: "Pending Dispatch",
+      requestType: "Monthly Pick & Drop",
+      category: "Monthly Pick & Drop"
     });
 
     const savedRide = await newRide.save();
+
+    // Also sync to riderequests collection so both collections stay updated
+    try {
+      const db = mongoose.connection.db;
+      if (db) {
+        await db.collection("riderequests").updateOne(
+          { requestId: savedRide.requestId },
+          { $set: savedRide.toObject() },
+          { upsert: true }
+        );
+      }
+    } catch (syncErr) {
+      console.warn("Sync to riderequests notice:", syncErr.message);
+    }
 
     // Emit real-time event to Admin Portal via Socket.IO
     try {
@@ -78,7 +101,7 @@ exports.createMonthlyRide = async (req, res) => {
       if (io) {
         const ridePayload = {
           _id: savedRide._id,
-          id: savedRide._id,
+          id: savedRide.requestId || savedRide._id,
           mongoId: savedRide._id,
           requestId: savedRide.requestId,
           passengerName: savedRide.passengerName,
@@ -116,7 +139,7 @@ exports.createMonthlyRide = async (req, res) => {
             seating: savedRide.seatingArrangement || "Sedan Executive",
             selection: savedRide.vehicleTypeSelection || "Separate",
             ac: savedRide.acPreference || "AC",
-            label: `${savedRide.vehicleType || "Sedan"} â€¢ ${savedRide.acPreference || "AC"}`
+            label: `${savedRide.vehicleType || "Sedan"} • ${savedRide.acPreference || "AC"}`
           },
           vehicleType: savedRide.vehicleType || "Sedan",
           acPreference: savedRide.acPreference || "AC",
@@ -128,12 +151,26 @@ exports.createMonthlyRide = async (req, res) => {
           status: savedRide.status,
           statusLabel: savedRide.status,
           isPending: savedRide.status === "Pending Dispatch",
+          requestType: "Monthly Pick & Drop",
+          category: "Monthly Pick & Drop",
+          type: "Monthly Pick & Drop",
           createdAt: savedRide.createdAt
         };
 
+        // Emit all event variations for admin dispatch listeners
         io.emit("new-ride", ridePayload);
         io.emit("ride-update", { type: "NEW_RIDE", ride: ridePayload });
-        console.log("ðŸ“¡ Real-time event emitted: new-ride", savedRide.requestId);
+        io.emit("new-monthly-ride", ridePayload);
+        io.emit("monthly-ride-update", { type: "NEW_MONTHLY_RIDE", ride: ridePayload });
+        io.emit("new-monthly-pickup", ridePayload);
+        io.emit("monthly-pickup-update", { type: "NEW_MONTHLY_PICKUP", ride: ridePayload });
+        io.emit("new-monthly-request", ridePayload);
+        io.emit("monthly-request-update", { type: "NEW_MONTHLY_REQUEST", ride: ridePayload });
+        io.emit("new_ride", ridePayload);
+        io.emit("new_ride_request", ridePayload);
+        io.emit("new-request", ridePayload);
+        io.emit("request-update", { type: "NEW_REQUEST", request: ridePayload, ride: ridePayload });
+        console.log("📡 Real-time event emitted: new-ride, new-monthly-ride", savedRide.requestId);
       }
     } catch (socketErr) {
       console.warn("Socket emit notice:", socketErr.message);
@@ -142,7 +179,9 @@ exports.createMonthlyRide = async (req, res) => {
     return res.status(201).json({
       success: true,
       message: "Monthly ride booking submitted successfully. Awaiting dispatch.",
-      ride: savedRide
+      ride: savedRide,
+      requestId: savedRide.requestId,
+      data: savedRide
     });
   } catch (err) {
     console.error("Create Ride Error:", err);
@@ -162,8 +201,8 @@ exports.getAllRides = async (req, res) => {
     let query = {};
 
     if (status) {
-      if (status.toLowerCase() === "pending") {
-        query.status = "Pending Dispatch";
+      if (status.toLowerCase() === "pending" || status.toLowerCase() === "pending dispatch") {
+        query.status = { $in: ["Pending Dispatch", "Pending", "PENDING", "pending dispatch", "Replacement Requested"] };
       } else if (status.toLowerCase() === "assigned") {
         query.status = { $in: ["ASSIGNED", "Assigned", "assigned", "Awaiting Driver Acceptance", "Dispatched"] };
       } else {
@@ -215,7 +254,9 @@ exports.getAllRides = async (req, res) => {
 
     const rides = await RideRequest.find(query).sort({ createdAt: -1 }).lean();
 
-    const pendingCount = await RideRequest.countDocuments({ status: "Pending Dispatch" });
+    const pendingCount = await RideRequest.countDocuments({
+      status: { $in: ["Pending Dispatch", "Pending", "PENDING", "pending dispatch", "Replacement Requested"] }
+    });
     const assignedCount = await RideRequest.countDocuments({ status: "ASSIGNED" });
 
     // Format rides to match any Admin Dispatch table structure directly
@@ -270,8 +311,11 @@ exports.getAllRides = async (req, res) => {
       cnic: ride.cnic || "",
       status: ride.status,
       statusLabel: ride.status,
-      isPending: ride.status === 'Pending Dispatch',
+      isPending: /pending/i.test(ride.status) || ride.status === 'Replacement Requested',
       isAssigned: ride.status === 'ASSIGNED',
+      requestType: ride.requestType || "Monthly Pick & Drop",
+      category: ride.category || "Monthly Pick & Drop",
+      type: "Monthly Pick & Drop",
       assignedDriver: ride.assignedDriverName || ride.assignedDriver || null,
       assignedDriverName: ride.assignedDriverName || ride.assignedDriver || null,
       assignedDriverId: ride.assignedDriverId || ride.driverId || ride.driver || null,
@@ -313,35 +357,57 @@ exports.getAllRides = async (req, res) => {
         const rplRideId = rpl.rideId || rplReqId;
         const alreadyIncluded = formattedRides.some(r => r.requestId === rplRideId || r.requestId === rplReqId || r._id === rplReqId);
         if (!alreadyIncluded) {
+          // If pickup/dropoff are missing on replacement doc, look up original RideRequest
+          let orig = null;
+          if ((!rpl.pickupLocation || !rpl.dropoffLocation) && rplRideId) {
+            orig = await RideRequest.findOne({
+              $or: [
+                { requestId: rplRideId },
+                ...(mongoose.Types.ObjectId.isValid(rplRideId) ? [{ _id: new mongoose.Types.ObjectId(rplRideId) }] : [])
+              ]
+            }).lean().catch(() => null);
+          }
+
+          const resolvedPickup = rpl.pickupLocation || rpl.pickup || (orig ? orig.pickupLocation : null) || "Pickup Location";
+          const resolvedDropoff = rpl.dropoffLocation || rpl.dropoff || (orig ? orig.dropoffLocation : null) || "Drop-off Location";
+          const resolvedTimeToReach = rpl.timeToReach || (orig ? orig.timeToReach : null) || rpl.timeSlot || rpl.scheduledTime || "08:00 AM";
+          const resolvedTimeToLeave = rpl.timeToLeave || (orig ? orig.timeToLeave : null) || "05:00 PM";
+          const resolvedClientName = rpl.clientName || rpl.passengerName || (orig ? orig.passengerName : null) || "Customer";
+          const resolvedClientPhone = rpl.clientPhone || rpl.passengerPhone || (orig ? orig.passengerPhone : null) || "";
+
           const dObj = rpl.assignedDriver || {};
-          formattedRides.unshift({
+          formattedRides.push({
             _id: rplReqId || (rpl._id ? rpl._id.toString() : ""),
             id: rplReqId || (rpl._id ? rpl._id.toString() : ""),
             mongoId: rpl._id ? rpl._id.toString() : rplReqId,
             requestId: rplReqId,
             rideId: rplRideId,
-            passengerName: rpl.clientName || rpl.passengerName || "Customer",
-            passengerPhone: rpl.clientPhone || rpl.passengerPhone || "",
+            passengerName: resolvedClientName,
+            passengerPhone: resolvedClientPhone,
             passengerEmail: rpl.passengerEmail || "",
             passenger: {
-              name: rpl.clientName || rpl.passengerName || "Customer",
-              phone: rpl.clientPhone || rpl.passengerPhone || "",
+              name: resolvedClientName,
+              phone: resolvedClientPhone,
               email: rpl.passengerEmail || ""
             },
-            pickupLocation: rpl.pickupLocation || rpl.pickup || "Pickup Location",
-            dropoffLocation: rpl.dropoffLocation || rpl.dropoff || "Drop-off Location",
+            pickupLocation: resolvedPickup,
+            dropoffLocation: resolvedDropoff,
+            pickup: resolvedPickup,
+            drop: resolvedDropoff,
             route: {
-              pickup: rpl.pickupLocation || rpl.pickup || "Pickup Location",
-              dropoff: rpl.dropoffLocation || rpl.dropoff || "Drop-off Location",
-              summary: `${rpl.pickupLocation || "Pickup"} -> ${rpl.dropoffLocation || "Drop-off"}`,
+              pickup: resolvedPickup,
+              dropoff: resolvedDropoff,
+              summary: `${resolvedPickup} -> ${resolvedDropoff}`,
               passengers: 1
             },
-            scheduledTime: rpl.timeSlot || rpl.scheduledTime || rpl.timeToReach || "08:00 AM",
-            timeToReach: rpl.timeSlot || "08:00 AM",
-            timeToLeave: "",
-            startingFrom: rpl.scheduledDate || rpl.startingFrom || new Date().toISOString().split("T")[0],
+            scheduledTime: resolvedTimeToReach,
+            timeToReach: resolvedTimeToReach,
+            pickupTime: resolvedTimeToReach,
+            timeToLeave: resolvedTimeToLeave,
+            dropoffTime: resolvedTimeToLeave,
+            startingFrom: rpl.scheduledDate || rpl.startingFrom || (orig ? orig.startingFrom : null) || new Date().toISOString().split("T")[0],
             scheduleType: "Monthly Replacement",
-            scheduleTime: rpl.timeSlot || "08:00 AM",
+            scheduleTime: resolvedTimeToReach,
             customSchedule: {},
             selectedDays: "Mon - Sat",
             vehicle: {
@@ -364,8 +430,8 @@ exports.getAllRides = async (req, res) => {
             cnic: "",
             status: rpl.status || "ASSIGNED",
             statusLabel: rpl.status || "ASSIGNED",
-            isPending: false,
-            isAssigned: true,
+            isPending: /pending/i.test(rpl.status || '') || rpl.status === 'Replacement Requested',
+            isAssigned: rpl.status === 'ASSIGNED' || rpl.status === 'Dispatched',
             assignedDriver: dObj.name || "",
             assignedDriverName: dObj.name || "",
             assignedDriverId: dObj.driverId || "",
@@ -375,6 +441,13 @@ exports.getAllRides = async (req, res) => {
         }
       }
     } catch (_) {}
+
+    // Ensure all rides (regular + replacements) are strictly sorted by creation date descending
+    formattedRides.sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
 
     return res.status(200).json({
       success: true,
@@ -398,7 +471,25 @@ exports.getAllRides = async (req, res) => {
 // 3. Get Single Ride Details
 exports.getRideById = async (req, res) => {
   try {
-    const ride = await RideRequest.findById(req.params.id);
+    let ride = null;
+    if (mongoose.Types.ObjectId.isValid(req.params.id)) {
+      ride = await RideRequest.findById(req.params.id).catch(() => null);
+    }
+    if (!ride) {
+      ride = await RideRequest.findOne({ requestId: req.params.id }).catch(() => null);
+    }
+    if (!ride) {
+      try {
+        const rplCol = mongoose.connection.db.collection("replacementrequests");
+        const rplDoc = await rplCol.findOne({
+          $or: [
+            { requestId: req.params.id },
+            ...(mongoose.Types.ObjectId.isValid(req.params.id) ? [{ _id: new mongoose.Types.ObjectId(req.params.id) }] : [])
+          ]
+        });
+        if (rplDoc) ride = rplDoc;
+      } catch (_) {}
+    }
     if (!ride) {
       return res.status(404).json({
         success: false,
@@ -459,6 +550,7 @@ exports.dispatchRide = async (req, res) => {
     }
 
     // Step 3: Update using actual MongoDB _id (not the requestId string)
+    // Also clear driverIssue so the newly assigned driver starts fresh
     const updatedRide = await RideRequest.findByIdAndUpdate(
       existingRide._id,
       {
@@ -467,7 +559,8 @@ exports.dispatchRide = async (req, res) => {
         driverId: driverId || null,
         driver: driverId || null,
         assignedDriverName: assignedName || "Assigned Driver",
-        assignedDriver: assignedName || "Assigned Driver"
+        assignedDriver: assignedName || "Assigned Driver",
+        driverIssue: null
       },
       { returnDocument: 'after', new: true }
     );
@@ -507,12 +600,13 @@ exports.dispatchRide = async (req, res) => {
         title: "🚗 New Ride Dispatched!",
         subtitle: `Admin assigned ride ${updatedRide.requestId} (${updatedRide.passengerName || "Customer"}) to you. Tap to view ride details.`,
         status: "ASSIGNED",
-        type: "RIDE_ASSIGNED",
+        type: "NEW_ASSIGNMENT",
         customerName: updatedRide.passengerName || "Customer",
         customerPhone: updatedRide.passengerPhone || "",
         pickup: updatedRide.pickupLocation || "Pickup Point",
         destination: updatedRide.dropoffLocation || "Destination Point",
         fareFormatted: updatedRide.fare ? `Rs. ${Number(updatedRide.fare).toLocaleString()}` : "Rs. 9,500",
+        payload: updatedRide,
         isRead: false,
         isDismissed: false
       };
@@ -523,29 +617,58 @@ exports.dispatchRide = async (req, res) => {
       );
       const io = req.app.get("io");
       if (io) {
-        io.emit("driver-notification", driverNotif);
-        if (driverId) io.to(driverId.toString()).emit("driver-notification", driverNotif);
-        io.emit("ride-dispatched", { ride: updatedRide, notification: driverNotif });
+        const fullPayload = {
+          ...driverNotif,
+          ride: updatedRide,
+          data: updatedRide,
+          payload: updatedRide
+        };
+
+        const targetRooms = [
+          `driver-${driverId}`,
+          `driver_${driverId}`,
+          String(driverId)
+        ];
+        if (assignedName) {
+          targetRooms.push(`driver-${assignedName}`);
+          targetRooms.push(`driver_${assignedName}`);
+          targetRooms.push(assignedName);
+        }
+
+        targetRooms.forEach(room => {
+          io.to(room).emit("new-assignment", fullPayload);
+          io.to(room).emit("ride-assigned", fullPayload);
+          io.to(room).emit("ride-dispatched", fullPayload);
+          io.to(room).emit("new-notification", fullPayload);
+          io.to(room).emit("driver-notification", fullPayload);
+        });
+
+        // Global broadcast for any active sockets
+        io.emit("new-assignment", fullPayload);
+        io.emit("ride-assigned", fullPayload);
+        io.emit("ride-dispatched", fullPayload);
+        io.emit("new-notification", fullPayload);
+        io.emit("driver-notification", fullPayload);
         io.emit("ride-updated", { type: "RIDE_DISPATCHED", ride: updatedRide, notification: driverNotif });
       }
     } catch (driverNotifErr) {
       console.warn("Failed saving driver notification for dispatched ride:", driverNotifErr.message);
     }
 
-    // Persist CustomerNotification for Driver Assigned
+    // Persist CustomerNotification for Driver Assigned (admin assigned — driver has NOT accepted yet)
     try {
       await CustomerNotification.findOneAndUpdate(
-        { notificationId: `${updatedRide.requestId}_ACCEPTED` },
+        { notificationId: `${updatedRide.requestId}_ASSIGNED` },
         {
           customerId: updatedRide.customerId || updatedRide.passengerPhone,
           passengerPhone: updatedRide.passengerPhone,
           passengerEmail: updatedRide.passengerEmail || "",
           rideId: updatedRide.requestId,
           mongoId: updatedRide._id ? updatedRide._id.toString() : updatedRide.requestId,
-          notificationId: `${updatedRide.requestId}_ACCEPTED`,
-          title: "🚗 Driver Assigned!",
-          subtitle: `Driver ${assignedName || "A driver"} has been assigned to your ride (${updatedRide.requestId}).`,
-          status: "ACCEPTED",
+          notificationId: `${updatedRide.requestId}_ASSIGNED`,
+          title: "📋 Driver Assigned!",
+          subtitle: `Driver ${assignedName || "A driver"} has been assigned to your ride (${updatedRide.requestId}). Waiting for driver confirmation.`,
+          status: "ASSIGNED",
           fareFormatted: updatedRide.fare ? `Rs. ${Number(updatedRide.fare).toLocaleString()}` : "",
           pickup: updatedRide.pickupLocation || "Pickup Point",
           destination: updatedRide.dropoffLocation || "Destination Point",
@@ -570,12 +693,13 @@ exports.dispatchRide = async (req, res) => {
       if (io) {
         io.emit("ride-dispatched", updatedRide);
         io.emit("ride-update", { type: "RIDE_DISPATCHED", ride: updatedRide });
-        io.emit("ride_accepted", {
+        // Emit ASSIGNED (not ACCEPTED) — driver has not accepted yet, admin just assigned
+        io.emit("ride_assigned", {
           requestId: updatedRide.requestId,
           customerId: updatedRide.customerId,
           passengerName: updatedRide.passengerName,
           passengerPhone: updatedRide.passengerPhone,
-          status: "ACCEPTED",
+          status: "ASSIGNED",
           driverDetails: {
             name: assignedName || "Assigned Driver",
             driverCode: driverId || "DRV-ASSIGNED",
@@ -644,13 +768,49 @@ exports.updateRide = async (req, res) => {
     }
 
     if (!updatedRide) {
+      try {
+        const rplCol = mongoose.connection.db.collection("replacementrequests");
+        const rplDoc = await rplCol.findOne({
+          $or: [
+            { requestId: rideId },
+            ...(mongoose.Types.ObjectId.isValid(rideId) ? [{ _id: new mongoose.Types.ObjectId(rideId) }] : [])
+          ]
+        });
+        if (rplDoc) {
+          const updateFields = {};
+          if (status) updateFields.status = status;
+          if (notes !== undefined) updateFields.notes = notes;
+          if (fare !== undefined && fare !== null && !isNaN(Number(fare))) updateFields.fare = Number(fare);
+          if (driverId) updateFields["assignedDriver.driverId"] = driverId;
+          if (driverName) updateFields["assignedDriver.name"] = driverName;
+          await rplCol.updateOne({ _id: rplDoc._id }, { $set: updateFields });
+          const freshRpl = await rplCol.findOne({ _id: rplDoc._id });
+          return res.status(200).json({
+            success: true,
+            message: "Replacement ride updated successfully",
+            ride: freshRpl
+          });
+        }
+      } catch (_) {}
+    }
+    if (!updatedRide) {
       return res.status(404).json({
         success: false,
         message: `Ride request ${rideId} not found`
       });
     }
 
-    if (fare !== undefined) updatedRide.fare = Number(fare);
+    const isFareUpdated = (fare !== undefined && fare !== null && !isNaN(Number(fare)) && Number(fare) >= 0 && (Number(fare) !== Number(updatedRide.fare) || status === "PRICE_UPDATED" || req.body.fareStatus === "PRICE_UPDATED"));
+    if (isFareUpdated) {
+      updatedRide.fare = Number(fare);
+      if (!status || status === "PRICE_UPDATED") {
+        if (updatedRide.status !== "COMPLETED" && updatedRide.status !== "Completed" && updatedRide.status !== "PAID") {
+          updatedRide.status = "PRICE_UPDATED";
+        }
+      }
+      updatedRide.fareResponseStatus = "Pending";
+      updatedRide.fareStatus = "PRICE_UPDATED";
+    }
     if (status) updatedRide.status = status;
     if (notes !== undefined) updatedRide.notes = notes;
 
@@ -693,7 +853,7 @@ exports.updateRide = async (req, res) => {
 
     await updatedRide.save();
 
-    // Prepare complete payload for real-time customer notification
+    // Prepare complete payload and driver details for real-time customer and driver notifications
     const dDetails = updatedRide.assignedDriverDetails || {};
     const driverDetails = {
       driverId: updatedRide.assignedDriverId || dDetails.driverId || "",
@@ -721,8 +881,48 @@ exports.updateRide = async (req, res) => {
       driver: driverDetails
     };
 
+    // Persist CustomerNotification for Fare Update
+    if (isFareUpdated && updatedRide.status !== "COMPLETED" && updatedRide.status !== "Completed") {
+      try {
+        const fareFormatted = `Rs. ${Number(updatedRide.fare || 0).toLocaleString()}`;
+        const notifId = `${updatedRide.requestId}_price_updated`;
+
+        await CustomerNotification.findOneAndUpdate(
+          { notificationId: notifId },
+          {
+            customerId: updatedRide.customerId || updatedRide.passengerPhone,
+            passengerPhone: updatedRide.passengerPhone,
+            passengerEmail: updatedRide.passengerEmail || "",
+            rideId: updatedRide.requestId,
+            mongoId: updatedRide._id ? updatedRide._id.toString() : updatedRide.requestId,
+            notificationId: notifId,
+            title: "💰 Ride Price Updated!",
+            subtitle: `Admin has updated your ride fare to ${fareFormatted}. Tap to review and confirm.`,
+            status: "PRICE_UPDATED",
+            fareResponseStatus: "Pending",
+            fareFormatted: fareFormatted,
+            pickup: updatedRide.pickupLocation || "Pickup Point",
+            destination: updatedRide.dropoffLocation || "Destination Point",
+            driverName: driverDetails ? driverDetails.name : "",
+            driverPhone: driverDetails ? driverDetails.phone : "",
+            driverCode: driverDetails ? driverDetails.driverCode : "",
+            rating: driverDetails ? driverDetails.rating : "",
+            vehicle: driverDetails ? driverDetails.vehicle : "",
+            numberPlate: driverDetails ? driverDetails.numberPlate : "",
+            isRead: false,
+            isDismissed: false
+          },
+          { upsert: true, new: true }
+        );
+        console.log(`✅ CustomerNotification [PRICE_UPDATED] saved for ride ${updatedRide.requestId}: ${fareFormatted}`);
+      } catch (fareNotifErr) {
+        console.warn("Failed saving customer notification for updated fare:", fareNotifErr.message);
+      }
+    }
+
     // Persist CustomerNotification for Driver Accepted or Assigned (ONLY Driver Details)
-    if (updatedRide.status === "ACCEPTED" || updatedRide.status === "Accepted" || updatedRide.status === "ASSIGNED") {
+    if (updatedRide.status === "ACCEPTED" || updatedRide.status === "Accepted") {
+      // Only send "Driver Accepted" notification when driver ACTUALLY accepts — not when admin assigns
       try {
         await CustomerNotification.findOneAndUpdate(
           { notificationId: `${updatedRide.requestId}_ACCEPTED` },
@@ -752,6 +952,38 @@ exports.updateRide = async (req, res) => {
         );
       } catch (notifErr) {
         console.warn("Failed saving customer notification for accepted ride:", notifErr.message);
+      }
+    } else if (updatedRide.status === "ASSIGNED") {
+      // Admin assigned ride — notify customer that a driver is ASSIGNED (not accepted yet)
+      try {
+        await CustomerNotification.findOneAndUpdate(
+          { notificationId: `${updatedRide.requestId}_ASSIGNED` },
+          {
+            customerId: updatedRide.customerId || updatedRide.passengerPhone,
+            passengerPhone: updatedRide.passengerPhone,
+            passengerEmail: updatedRide.passengerEmail || "",
+            rideId: updatedRide.requestId,
+            mongoId: updatedRide._id ? updatedRide._id.toString() : updatedRide.requestId,
+            notificationId: `${updatedRide.requestId}_ASSIGNED`,
+            title: "🚗 Driver Assigned!",
+            subtitle: `Driver ${driverDetails.name} has been assigned to your ride (${updatedRide.requestId}). Waiting for driver confirmation.`,
+            status: "ASSIGNED",
+            fareFormatted: notifyPayload.fareFormatted,
+            pickup: updatedRide.pickupLocation || "Pickup Point",
+            destination: updatedRide.dropoffLocation || "Destination Point",
+            driverName: driverDetails.name,
+            driverPhone: driverDetails.phone,
+            driverCode: driverDetails.driverCode,
+            rating: driverDetails.rating,
+            vehicle: driverDetails.vehicle,
+            numberPlate: driverDetails.numberPlate,
+            isRead: false,
+            isDismissed: false
+          },
+          { upsert: true, new: true }
+        );
+      } catch (notifErr) {
+        console.warn("Failed saving customer notification for assigned ride:", notifErr.message);
       }
     }
 
@@ -796,6 +1028,30 @@ exports.updateRide = async (req, res) => {
           },
           { upsert: true, new: true }
         );
+
+        // Store / ensure payment record in Payment History (collection: payments)
+        try {
+          const Payment = require("../schema/Payment");
+          const fareStr = notifyPayload.fareFormatted || (updatedRide.fare ? `Rs. ${Number(updatedRide.fare).toLocaleString()}` : "Rs. 0");
+          await Payment.findOneAndUpdate(
+            { rideId: updatedRide.requestId },
+            {
+              customerId: updatedRide.customerId || null,
+              customerName: updatedRide.passengerName || "Customer",
+              customerPhone: updatedRide.passengerPhone || "",
+              rideId: updatedRide.requestId,
+              fare: fareStr,
+              pickup: updatedRide.pickupLocation || "",
+              destination: updatedRide.dropoffLocation || "",
+              driverName: driverDetails.name || "",
+              status: updatedRide.isPaid ? "PAID" : "PENDING PAYMENT"
+            },
+            { upsert: true, new: true }
+          );
+          console.log(`✅ Payment record stored in Payment History for ride ${updatedRide.requestId}: ${fareStr}`);
+        } catch (paySaveErr) {
+          console.warn("Notice saving payment record for completed ride:", paySaveErr.message);
+        }
       } catch (notifErr) {
         console.warn("Failed saving customer notification for completed ride:", notifErr.message);
       }
@@ -842,8 +1098,35 @@ exports.updateRide = async (req, res) => {
           io.to(`ride_${rId}`).emit("ride-accepted", notifyPayload);
         }
         if (updatedRide.status === "COMPLETED" || updatedRide.status === "Completed") {
-          if (custId) io.to(`customer_${custId}`).emit("ride-completed", notifyPayload);
-          if (custPhone) io.to(`customer_${custPhone}`).emit("ride-completed", notifyPayload);
+          const completedPayload = {
+            ...notifyPayload,
+            id: `${rId}_COMPLETED`,
+            notificationId: `${rId}_COMPLETED`,
+            rideId: rId,
+            requestId: rId,
+            type: "RIDE_COMPLETED",
+            status: "COMPLETED",
+            title: "💳 Ride Completed - Pay Fare",
+            subtitle: `Your ride ${rId} is complete. Please tap to submit payment of ${notifyPayload.fareFormatted}.`,
+            fareFormatted: notifyPayload.fareFormatted,
+            fare: updatedRide.fare,
+            pickup: updatedRide.pickupLocation,
+            destination: updatedRide.dropoffLocation,
+            driverDetails: driverDetails,
+            driverName: driverDetails.name,
+            createdAt: new Date().toISOString()
+          };
+
+          if (custId) {
+            io.to(`customer_${custId}`).emit("ride-completed", completedPayload);
+            io.to(`customer_${custId}`).emit("customer-notification", completedPayload);
+            io.to(`customer_${custId}`).emit("ride-updated", completedPayload);
+          }
+          if (custPhone) {
+            io.to(`customer_${custPhone}`).emit("ride-completed", completedPayload);
+            io.to(`customer_${custPhone}`).emit("customer-notification", completedPayload);
+            io.to(`customer_${custPhone}`).emit("ride-updated", completedPayload);
+          }
           if (drvId) {
             io.to(`driver_${drvId}`).emit("trip-completed", notifyPayload);
             io.to(`driver_${drvId}`).emit("driver-notification", {
@@ -853,7 +1136,38 @@ exports.updateRide = async (req, res) => {
               status: "COMPLETED"
             });
           }
-          io.to(`ride_${rId}`).emit("ride-completed", notifyPayload);
+          io.to(`ride_${rId}`).emit("ride-completed", completedPayload);
+          io.emit("ride-completed", completedPayload);
+          io.emit("customer-notification", completedPayload);
+          io.emit("ride-updated", completedPayload);
+          console.log(`📡 Real-time event [ride-completed] emitted to customer for ride ${rId}`);
+        }
+        if (isFareUpdated && updatedRide.status !== "COMPLETED") {
+          const farePayload = {
+            ...notifyPayload,
+            type: "PRICE_UPDATED",
+            status: "PRICE_UPDATED",
+            fareUpdated: true,
+            fareResponseStatus: "Pending",
+            title: "💰 Ride Price Updated!",
+            subtitle: `Admin has updated your ride fare to ${notifyPayload.fareFormatted}.`
+          };
+          if (custId) {
+            io.to(`customer_${custId}`).emit("ride-updated", farePayload);
+            io.to(`customer_${custId}`).emit("fare-updated", farePayload);
+            io.to(`customer_${custId}`).emit("customer-notification", farePayload);
+          }
+          if (custPhone) {
+            io.to(`customer_${custPhone}`).emit("ride-updated", farePayload);
+            io.to(`customer_${custPhone}`).emit("fare-updated", farePayload);
+            io.to(`customer_${custPhone}`).emit("customer-notification", farePayload);
+          }
+          io.to(`ride_${rId}`).emit("ride-updated", farePayload);
+          io.to(`ride_${rId}`).emit("fare-updated", farePayload);
+          io.emit("ride-updated", farePayload);
+          io.emit("fare-updated", farePayload);
+          io.emit("customer-notification", farePayload);
+          console.log(`📡 Real-time fare update emitted to customer for ride ${rId}: ${notifyPayload.fareFormatted}`);
         }
         if (custId) io.to(`customer_${custId}`).emit("ride-updated", notifyPayload);
         if (custPhone) io.to(`customer_${custPhone}`).emit("ride-updated", notifyPayload);
@@ -920,6 +1234,18 @@ exports.reportDriverUnavailable = async (req, res) => {
     };
 
     await ride.save();
+
+    // Sync to riderequests collection
+    try {
+      const db = mongoose.connection.db;
+      if (db) {
+        await db.collection("riderequests").updateOne(
+          { requestId: ride.requestId },
+          { $set: ride.toObject() },
+          { upsert: true }
+        );
+      }
+    } catch (_) {}
 
     const notifyPayload = {
       title: "Driver Unavailable",
@@ -1010,6 +1336,45 @@ exports.requestReplacementDriver = async (req, res) => {
 
     await ride.save();
 
+    // Sync to riderequests and replacementrequests collections
+    try {
+      const db = mongoose.connection.db;
+      if (db) {
+        await db.collection("riderequests").updateOne(
+          { requestId: ride.requestId },
+          { $set: ride.toObject() },
+          { upsert: true }
+        );
+        await db.collection("replacementrequests").updateOne(
+          { $or: [{ rideId: ride.requestId }, { rideId: ride._id.toString() }, { requestId: ride.requestId }] },
+          {
+            $set: {
+              requestId: ride.requestId,
+              rideId: ride.requestId || ride._id.toString(),
+              clientName: ride.passengerName,
+              passengerName: ride.passengerName,
+              passengerPhone: ride.passengerPhone,
+              passengerEmail: ride.passengerEmail || "",
+              pickupLocation: ride.pickupLocation,
+              dropoffLocation: ride.dropoffLocation,
+              scheduledDate: ride.startingFrom,
+              startingFrom: ride.startingFrom,
+              timeToReach: ride.timeToReach,
+              timeToLeave: ride.timeToLeave,
+              fare: ride.fare || 0,
+              preferences: ride.replacementPreferences,
+              status: "Replacement Requested",
+              createdAt: new Date(),
+              updatedAt: new Date()
+            }
+          },
+          { upsert: true }
+        );
+      }
+    } catch (syncErr) {
+      console.warn("Replacement sync notice:", syncErr.message);
+    }
+
     const adminPayload = {
       rideId: ride.requestId || ride._id,
       mongoId: ride._id,
@@ -1094,12 +1459,24 @@ exports.getCustomerNotifications = async (req, res) => {
     }
 
     const query = queryConds.length > 0 ? { $or: queryConds } : {};
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    // 1. Fetch persistent notifications from CustomerNotification collection (exclude dismissed)
-    const storedNotifs = await CustomerNotification.find({
+    // 1. Fetch persistent notifications from CustomerNotification collection (exclude dismissed and ride assigned notifications older than 1 day)
+    const storedNotifsRaw = await CustomerNotification.find({
       ...(queryConds.length > 0 ? query : {}),
       isDismissed: { $ne: true }
     }).sort({ createdAt: -1 }).lean().catch(() => []);
+
+    const storedNotifs = storedNotifsRaw.filter(n => {
+      const isAssigned = (n.status === "ACCEPTED" || n.status === "Accepted" || n.status === "ASSIGNED" || n.status === "Driver Assigned" ||
+        String(n.notificationId || "").toUpperCase().endsWith("_ACCEPTED") ||
+        String(n.notificationId || "").toUpperCase().endsWith("_ASSIGNED") ||
+        /driver assigned|ride assigned/i.test(n.title || ""));
+      if (isAssigned && n.createdAt && new Date(n.createdAt) < oneDayAgo) {
+        return false;
+      }
+      return true;
+    });
 
     // Also get set of dismissed notification keys so dynamically generated items stay dismissed
     const dismissedNotifs = await CustomerNotification.find({
@@ -1131,14 +1508,19 @@ exports.getCustomerNotifications = async (req, res) => {
       return false;
     };
 
-    // 2. Fetch active rides for customer from RideRequest and ScheduleRide collections
+    // 2. Fetch active rides for customer from RideRequest, ScheduleRide, and TravelTourismRequest collections
     const customerRides = await RideRequest.find(queryConds.length > 0 ? query : {}).sort({ updatedAt: -1 }).lean().catch(() => []);
     let scheduleRides = [];
     try {
       const ScheduleRide = require("../schema/ScheduleRide");
       scheduleRides = await ScheduleRide.find(queryConds.length > 0 ? query : {}).sort({ updatedAt: -1 }).lean().catch(() => []);
     } catch (_) {}
-    const allCustomerRides = [...customerRides, ...scheduleRides];
+    let travelRequests = [];
+    try {
+      const TravelTourismRequest = require("../schema/TravelTourismRequest");
+      travelRequests = await TravelTourismRequest.find(queryConds.length > 0 ? query : {}).sort({ updatedAt: -1 }).lean().catch(() => []);
+    } catch (_) {}
+    const allCustomerRides = [...customerRides, ...scheduleRides, ...travelRequests];
 
     // 3. Find all paid rides (from Payment collection and ride status)
     const paidRideIds = new Set();
@@ -1201,9 +1583,12 @@ exports.getCustomerNotifications = async (req, res) => {
       const hasCustomerAccepted = r.customerAccepted === true || r.status === "Customer Accepted" || r.status === "CUSTOMER_ACCEPTED";
 
       // A) Driver Accepted / Assigned
-      // ONLY show if customer has NOT accepted yet, ride is NOT completed, and not dismissed
+      // ONLY show if customer has NOT accepted yet, ride is NOT completed, and not dismissed, and assignment was within last 24 hours (1 day)
       const isAcceptedStatus = (r.status === "ACCEPTED" || r.status === "Accepted" || r.status === "ASSIGNED" || r.status === "Driver Assigned");
-      if (isAcceptedStatus && !hasCustomerAccepted && !isRideCompleted) {
+      const assignedTime = r.assignedAt || r.driverAcceptedAt || r.updatedAt || r.createdAt;
+      const isAssignedOlderThanOneDay = assignedTime && new Date(assignedTime) < oneDayAgo;
+
+      if (isAcceptedStatus && !hasCustomerAccepted && !isRideCompleted && !isAssignedOlderThanOneDay) {
         const notifKey = `${rId}_accepted`;
         if (!isNotificationDismissed(notifKey, rId, "ACCEPTED")) {
           const dDetails = r.assignedDriverDetails || {};
@@ -1267,7 +1652,7 @@ exports.getCustomerNotifications = async (req, res) => {
       }
 
       // C) Fare / Price Update - ONLY if status is explicitly PRICE_UPDATED or Pending Dispatch with pending fare approval, not yet responded, and not completed
-      const isPriceUpdated = (r.status === "PRICE_UPDATED");
+      const isPriceUpdated = (r.status === "PRICE_UPDATED" || r.fareStatus === "PRICE_UPDATED");
       const isFareDecided = (r.fareResponseStatus === "Fare Accepted" || r.fareResponseStatus === "Fare Rejected" || r.fareStatus === "Fare Accepted" || r.fareStatus === "Fare Rejected");
 
       if (isPriceUpdated && !isFareDecided && !isRideCompleted) {
@@ -1327,6 +1712,21 @@ exports.getCustomerNotifications = async (req, res) => {
       const rId = String(n.rideId || n.requestId || n.id || "").trim();
       const st = n.status || "";
 
+      // 0. Only show PRICE_UPDATED if ride is actually in PRICE_UPDATED status and not decided
+      if (st === "PRICE_UPDATED" || (n.notificationId && String(n.notificationId).toLowerCase().includes("_price_updated"))) {
+        const matchingRide = allCustomerRides.find(r => {
+          const mId = String(r.requestId || (r._id ? r._id.toString() : "")).trim();
+          return mId === rId;
+        });
+        if (matchingRide) {
+          const isReallyPriceUpdated = (matchingRide.status === "PRICE_UPDATED" || matchingRide.fareStatus === "PRICE_UPDATED");
+          const isDecided = (matchingRide.fareResponseStatus === "Fare Accepted" || matchingRide.fareResponseStatus === "Fare Rejected" || matchingRide.fareStatus === "Fare Accepted" || matchingRide.fareStatus === "Fare Rejected");
+          if (!isReallyPriceUpdated || isDecided) {
+            continue;
+          }
+        }
+      }
+
       // 1. If customer accepted the ride, do not show accept ride notification
       if (n.customerAccepted === true || st === "CUSTOMER_ACCEPTED" || st === "Customer Accepted") {
         continue;
@@ -1344,6 +1744,16 @@ exports.getCustomerNotifications = async (req, res) => {
 
       // 4. Check if dismissed
       if (isNotificationDismissed(n.notificationId, rId, st)) {
+        continue;
+      }
+
+      // 5. Automatically remove ride assigned notification when 1 day has passed (24 hours)
+      const isAssignedNotif = st === "ACCEPTED" || st === "Accepted" || st === "ASSIGNED" || st === "Driver Assigned" ||
+        String(n.notificationId || "").toUpperCase().endsWith("_ACCEPTED") ||
+        String(n.notificationId || "").toUpperCase().endsWith("_ASSIGNED") ||
+        /driver assigned|ride assigned/i.test(n.title || "");
+      const notifCreatedDate = n.createdAt ? new Date(n.createdAt) : null;
+      if (isAssignedNotif && notifCreatedDate && notifCreatedDate < oneDayAgo) {
         continue;
       }
 
@@ -1412,12 +1822,58 @@ exports.respondToFare = async (req, res) => {
     }
 
     let ride = null;
+    let rideType = "RideRequest";
+
+    // 1. Check in RideRequest
     if (mongoose.Types.ObjectId.isValid(rideId)) {
       ride = await RideRequest.findById(rideId).catch(() => null);
     }
     if (!ride) {
       ride = await RideRequest.findOne({ requestId: rideId }).catch(() => null);
     }
+
+    // 2. Check in ScheduleRide
+    if (!ride) {
+      try {
+        const ScheduleRide = require("../schema/ScheduleRide");
+        if (mongoose.Types.ObjectId.isValid(rideId)) {
+          ride = await ScheduleRide.findById(rideId).catch(() => null);
+        }
+        if (!ride) {
+          ride = await ScheduleRide.findOne({ requestId: rideId }).catch(() => null);
+        }
+        if (ride) rideType = "ScheduleRide";
+      } catch (_) {}
+    }
+
+    // 3. Check in DriverHireRequest
+    if (!ride) {
+      try {
+        const DriverHireRequest = require("../schema/DriverHireRequest");
+        if (mongoose.Types.ObjectId.isValid(rideId)) {
+          ride = await DriverHireRequest.findById(rideId).catch(() => null);
+        }
+        if (!ride) {
+          ride = await DriverHireRequest.findOne({ requestId: rideId }).catch(() => null);
+        }
+        if (ride) rideType = "DriverHireRequest";
+      } catch (_) {}
+    }
+
+    // 4. Check in TravelTourismRequest
+    if (!ride) {
+      try {
+        const TravelTourismRequest = require("../schema/TravelTourismRequest");
+        if (mongoose.Types.ObjectId.isValid(rideId)) {
+          ride = await TravelTourismRequest.findById(rideId).catch(() => null);
+        }
+        if (!ride) {
+          ride = await TravelTourismRequest.findOne({ requestId: rideId }).catch(() => null);
+        }
+        if (ride) rideType = "TravelTourismRequest";
+      } catch (_) {}
+    }
+
     if (!ride) {
       return res.status(404).json({
         success: false,
@@ -1428,11 +1884,28 @@ exports.respondToFare = async (req, res) => {
     const isAccepted = action.toUpperCase() === "ACCEPT";
     const newStatus = isAccepted ? "Fare Accepted" : "Fare Rejected";
     const name = customerName || ride.passengerName || "Customer";
-    const fareFormatted = ride.fare ? `Rs. ${ride.fare.toLocaleString()}` : "Rs. 9,500";
+    const fareFormatted = ride.fare ? `Rs. ${Number(ride.fare).toLocaleString()}` : "Rs. 9,500";
 
     ride.status = newStatus;
     ride.fareStatus = newStatus;
+    ride.fareResponseStatus = newStatus;
+    if (isAccepted) {
+      ride.customerAccepted = true;
+      ride.customerAcceptedAt = new Date();
+    }
     await ride.save();
+
+    // Sync to riderequests
+    try {
+      const db = mongoose.connection.db;
+      if (db) {
+        await db.collection("riderequests").updateOne(
+          { requestId: ride.requestId },
+          { $set: ride.toObject() },
+          { upsert: true }
+        );
+      }
+    } catch (_) {}
 
     // Prepare socket notification payload specifically for Admin Portal
     const adminNotification = {
@@ -1463,31 +1936,64 @@ exports.respondToFare = async (req, res) => {
         console.log(`📡 Real-time event [customer-fare-response] emitted to Admin Console for Ride ${ride.requestId}: ${adminNotification.action}`);
       }
 
-      // If customer accepted, also notify assigned Driver
+      // If customer accepted, notify assigned Driver immediately
       if (isAccepted) {
         const dDetails = ride.assignedDriverDetails || {};
-        const targetDriverId = ride.assignedDriverId || dDetails.driverId || null;
-        const targetDriverName = ride.assignedDriverName || dDetails.name || "Driver";
-        const targetDriverRef = dDetails.driverCode || ride.assignedDriverId || "";
+        let targetDriverId = ride.assignedDriverId || dDetails.driverId || null;
+        let targetDriverName = ride.assignedDriverName || dDetails.name || "";
+        let targetDriverRef = dDetails.driverCode || dDetails.driverReferenceId || (ride.assignedDriverId ? String(ride.assignedDriverId) : "");
         const rId = ride.requestId || ride._id.toString();
+
+        // If targetDriverId exists, lookup full Driver record to ensure all ID fields match
+        if (targetDriverId) {
+          try {
+            const Driver = require("../schema/Driver");
+            let drvDoc = null;
+            if (mongoose.Types.ObjectId.isValid(targetDriverId)) {
+              drvDoc = await Driver.findById(targetDriverId).catch(() => null);
+            }
+            if (!drvDoc) {
+              drvDoc = await Driver.findOne({
+                $or: [
+                  { driverReferenceId: targetDriverId },
+                  { driverCode: targetDriverId },
+                  { phone: targetDriverId }
+                ]
+              }).catch(() => null);
+            }
+            if (drvDoc) {
+              if (!targetDriverName) {
+                targetDriverName = drvDoc.Name || `${drvDoc.firstName || ""} ${drvDoc.lastName || ""}`.trim();
+              }
+              if (!targetDriverRef) {
+                targetDriverRef = drvDoc.driverReferenceId || drvDoc.driverCode || "";
+              }
+            }
+          } catch (_) {}
+        }
 
         const driverNotifData = {
           driverId: targetDriverId,
           driverReferenceId: targetDriverRef,
-          driverName: targetDriverName,
+          driverCode: targetDriverRef,
+          driverName: targetDriverName || "Driver",
+          assignedDriverId: targetDriverId,
+          assignedDriverName: targetDriverName || "Driver",
           rideId: rId,
           notificationId: `${rId}_FARE_ACCEPTED`,
           title: "🎉 Customer Accepted Ride!",
-          subtitle: `Customer ${name} has accepted the ride request (${rId}) with fare ${fareFormatted}. Tap to view ride details.`,
+          subtitle: `Customer ${name} has confirmed the updated fare of ${fareFormatted} (${rId}). Tap to view ride details.`,
           customerName: name,
           customerPhone: ride.passengerPhone || "",
           pickup: ride.pickupLocation || "Pickup Point",
           destination: ride.dropoffLocation || "Destination Point",
           fareFormatted: fareFormatted,
+          fare: ride.fare,
           status: "CUSTOMER_ACCEPTED",
           type: "CUSTOMER_ACCEPTED",
           isRead: false,
           isDismissed: false,
+          createdAt: new Date().toISOString(),
           payload: {
             id: rId,
             rideId: rId,
@@ -1504,9 +2010,16 @@ exports.respondToFare = async (req, res) => {
           }
         };
 
+        // Persist notification under both _FARE_ACCEPTED and _CUSTOMER_ACCEPTED keys
         await DriverNotification.findOneAndUpdate(
           { notificationId: `${rId}_FARE_ACCEPTED` },
           driverNotifData,
+          { upsert: true, new: true }
+        ).catch(() => {});
+
+        await DriverNotification.findOneAndUpdate(
+          { notificationId: `${rId}_CUSTOMER_ACCEPTED` },
+          { ...driverNotifData, notificationId: `${rId}_CUSTOMER_ACCEPTED` },
           { upsert: true, new: true }
         ).catch(() => {});
 
@@ -1519,10 +2032,18 @@ exports.respondToFare = async (req, res) => {
           if (targetDriverName) {
             io.to(targetDriverName).emit("customer-accepted-ride", driverNotifData);
             io.to(`driver_${targetDriverName}`).emit("customer-accepted-ride", driverNotifData);
+            io.to(`driver_${targetDriverName.trim().toLowerCase()}`).emit("customer-accepted-ride", driverNotifData);
           }
+          if (targetDriverRef) {
+            io.to(targetDriverRef).emit("customer-accepted-ride", driverNotifData);
+            io.to(`driver_${targetDriverRef}`).emit("customer-accepted-ride", driverNotifData);
+          }
+          // Global broadcast so connected driver device receives real-time alert without delay
           io.emit("customer-accepted-ride", driverNotifData);
           io.emit("driver-notification", driverNotifData);
-          console.log(`📡 Real-time event [customer-accepted-ride] emitted for driver for ride ${rId}`);
+          io.emit("ride-updated", { type: "CUSTOMER_ACCEPTED", ride: driverNotifData.payload, ...driverNotifData });
+          io.emit("ride_accepted", driverNotifData);
+          console.log(`📡 Real-time event [customer-accepted-ride] emitted for driver ${targetDriverName || "assigned"} for ride ${rId}`);
         }
       }
     } catch (socketErr) {
@@ -1912,34 +2433,42 @@ exports.acceptSuggestedRoute = async (req, res) => {
           rideFilter.push({ passengerName: new RegExp(`^${custName.trim()}$`, "i") });
         }
 
-        await RideRequest.updateMany(
-          { $or: rideFilter },
-          {
-            $set: {
-              status: "ACCEPTED",
-              assignedDriverId: driverId || resolvedCode,
-              assignedDriverName: resolvedName,
-              assignedDriverDetails: {
-                driverId: driverId || "",
-                driverCode: resolvedCode,
-                name: resolvedName,
-                phone: resolvedPhone,
-                rating: resolvedRating,
-                vehicle: resolvedVehicle,
-                registrationNumber: resolvedPlate
-              }
-            }
+        const updateRideData = {
+          status: "ACCEPTED",
+          assignedDriverId: driverId || resolvedCode,
+          assignedDriverName: resolvedName,
+          assignedDriverDetails: {
+            driverId: driverId || "",
+            driverCode: resolvedCode,
+            name: resolvedName,
+            phone: resolvedPhone,
+            rating: resolvedRating,
+            vehicle: resolvedVehicle,
+            registrationNumber: resolvedPlate
           }
-        );
+        };
+
+        await RideRequest.updateMany({ $or: rideFilter }, { $set: updateRideData }).catch(() => {});
+
+        try {
+          const ScheduleRide = require("../schema/ScheduleRide");
+          await ScheduleRide.updateMany({ $or: rideFilter }, { $set: updateRideData }).catch(() => {});
+        } catch (_) {}
+
+        try {
+          const TravelTourismRequest = require("../schema/TravelTourismRequest");
+          await TravelTourismRequest.updateMany({ $or: rideFilter }, { $set: updateRideData }).catch(() => {});
+        } catch (_) {}
       } catch (errReq) {
         console.warn("RideRequest update warning:", errReq.message);
       }
 
       // Create persistent Notification in CustomerNotification collection
       try {
-        const notifUniqueId = `${reqId}_DRIVER_ACCEPTED`;
+        const notifUniqueId = `${reqId}_ACCEPTED`;
         const notifConditions = [
           { notificationId: notifUniqueId },
+          { notificationId: `${reqId}_DRIVER_ACCEPTED` },
           { rideId: reqId, status: "ACCEPTED" }
         ];
         if (custPhone) {
@@ -1952,11 +2481,12 @@ exports.acceptSuggestedRoute = async (req, res) => {
             $set: {
               customerId: cust.customerId || custPhone || reqId,
               passengerPhone: custPhone,
-              passengerEmail: cust.email || "",
+              passengerEmail: cust.email || cust.passengerEmail || "",
               rideId: reqId,
+              mongoId: reqId,
               notificationId: notifUniqueId,
-              title: "🔔 Ride Accepted by Driver!",
-              subtitle: `Driver ${resolvedName} has accepted your ride request for ${route.routeName || effectiveRouteName}!`,
+              title: "🚗 Driver Accepted Ride!",
+              subtitle: `Driver ${resolvedName} has accepted your ride request (${reqId}) for ${route.routeName || effectiveRouteName}! Tap to view driver details.`,
               status: "ACCEPTED",
               fareFormatted: fareFormatted,
               pickup: cust.pickupLocation || cust.pickup || route.pickupPoint,
@@ -1978,7 +2508,8 @@ exports.acceptSuggestedRoute = async (req, res) => {
                 registrationNumber: resolvedPlate
               },
               isRead: false,
-              isDismissed: false
+              isDismissed: false,
+              createdAt: new Date()
             }
           },
           { upsert: true, new: true }
@@ -1997,8 +2528,8 @@ exports.acceptSuggestedRoute = async (req, res) => {
         passengerName: custName,
         passengerPhone: custPhone,
         passengerEmail: cust.email || "",
-        title: "🔔 Ride Accepted by Driver!",
-        subtitle: `Driver ${resolvedName} accepted your ride request for ${route.routeName || effectiveRouteName}.`,
+        title: "🚗 Driver Accepted Ride!",
+        subtitle: `Driver ${resolvedName} accepted your ride request for ${route.routeName || effectiveRouteName}. Tap to view driver details.`,
         fareFormatted: fareFormatted,
         fare: cust.fare,
         status: "ACCEPTED",
@@ -2029,7 +2560,9 @@ exports.acceptSuggestedRoute = async (req, res) => {
         try {
           if (cust.customerId) {
             io.to(`customer_${cust.customerId}`).emit("ride-accepted", notifyPayload);
+            io.to(`customer_${cust.customerId}`).emit("ride_accepted", notifyPayload);
             io.to(String(cust.customerId)).emit("ride-accepted", notifyPayload);
+            io.to(String(cust.customerId)).emit("ride_accepted", notifyPayload);
           }
           if (custPhone) {
             const phoneRooms = [
@@ -2044,18 +2577,25 @@ exports.acceptSuggestedRoute = async (req, res) => {
             for (const pr of phoneRooms) {
               if (pr) {
                 io.to(`customer_${pr}`).emit("ride-accepted", notifyPayload);
+                io.to(`customer_${pr}`).emit("ride_accepted", notifyPayload);
                 io.to(String(pr)).emit("ride-accepted", notifyPayload);
+                io.to(String(pr)).emit("ride_accepted", notifyPayload);
               }
             }
           }
           if (reqId) {
             io.to(`ride_${reqId}`).emit("ride-accepted", notifyPayload);
+            io.to(`ride_${reqId}`).emit("ride_accepted", notifyPayload);
           }
 
           // Broadcast to all connected customer dashboards
           io.emit("ride-accepted", notifyPayload);
           io.emit("ride_accepted", notifyPayload);
           io.emit("customer-notification", notifyPayload);
+          io.emit("customer_notification", notifyPayload);
+          io.emit("driver-assigned", notifyPayload);
+          io.emit("ride-updated", { type: "ACCEPTED", ride: notifyPayload, notification: notifyPayload });
+          io.emit("ride_updated", { type: "ACCEPTED", ride: notifyPayload, notification: notifyPayload });
         } catch (_) {}
       }
 
@@ -2196,17 +2736,27 @@ exports.getDriverNotifications = async (req, res) => {
       return res.status(200).json({ success: true, count: 0, notifications: [] });
     }
 
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
     let storedNotifications = [];
     if (queryConds.length > 0) {
-      storedNotifications = await DriverNotification.find({
-      $or: queryConds,
-      isDismissed: { $ne: true }
-    })
-      .sort({ createdAt: -1 })
-      .lean()
-      .catch(() => []);
+      const rawStoredNotifications = await DriverNotification.find({
+        $or: queryConds,
+        isDismissed: { $ne: true }
+      })
+        .sort({ createdAt: -1 })
+        .lean()
+        .catch(() => []);
 
-    // Also get dismissed keys
+      storedNotifications = rawStoredNotifications.filter(n => {
+        const isRideAssigned = (n.type === "RIDE_ASSIGNED" || n.status === "ASSIGNED" ||
+          String(n.notificationId || "").toUpperCase().endsWith("_ASSIGNED") ||
+          /ride assigned|ride dispatched|new ride assigned/i.test(n.title || ""));
+        if (isRideAssigned && n.createdAt && new Date(n.createdAt) < oneDayAgo) {
+          return false;
+        }
+        return true;
+      });
     }
 
     let dismissedNotifs = [];
@@ -2249,21 +2799,23 @@ exports.getDriverNotifications = async (req, res) => {
           continue;
         }
 
-        // Customer Accepted Ride
+        // Customer Accepted Ride or Confirmed Fare
         if (
           r.customerAccepted === true ||
           st.includes("customer accepted") ||
           st.includes("fare accepted") ||
-          // Customer accepted check
           st === "confirmed"
         ) {
           const notifKey = `${rId}_CUSTOMER_ACCEPTED`;
           if (!dismissedKeys.has(notifKey) && !dismissedRideIds.has(rId)) {
+            const isFareConf = st.includes("fare accepted") || r.fareResponseStatus === "Fare Accepted" || r.fareStatus === "Fare Accepted";
             dynamicNotifs.push({
               id: `${rId}_customer_accepted`,
               notificationId: notifKey,
-              title: "🎉 Customer Accepted Ride!",
-              subtitle: `Customer ${custName} has accepted your ride request (${rId}). Tap to view ride details.`,
+              title: isFareConf ? "🎉 Customer Confirmed Fare!" : "🎉 Customer Accepted Ride!",
+              subtitle: isFareConf
+                ? `Customer ${custName} has confirmed the updated fare of ${fareText} (${rId}). Tap to view ride details.`
+                : `Customer ${custName} has accepted your ride request (${rId}). Tap to view ride details.`,
               rideId: rId,
               requestId: rId,
               mongoId: r._id ? r._id.toString() : rId,
@@ -2272,6 +2824,7 @@ exports.getDriverNotifications = async (req, res) => {
               pickup: r.pickupLocation || "Pickup Point",
               destination: r.dropoffLocation || "Destination Point",
               fareFormatted: fareText,
+              fare: r.fare,
               status: "CUSTOMER_ACCEPTED",
               type: "CUSTOMER_ACCEPTED",
               isRead: false,
@@ -2284,7 +2837,10 @@ exports.getDriverNotifications = async (req, res) => {
         // New Ride Assigned by Admin
         else if (st === "assigned" || st === "accepted") {
           const notifKey = `${rId}_ASSIGNED`;
-          if (!dismissedKeys.has(notifKey) && !dismissedRideIds.has(rId) && !dismissedKeys.has(`${rId}_CUSTOMER_ACCEPTED`)) {
+          const assignedTimestamp = r.assignedAt || r.updatedAt || r.createdAt;
+          const isOlderThanOneDay = assignedTimestamp && new Date(assignedTimestamp) < oneDayAgo;
+
+          if (!isOlderThanOneDay && !dismissedKeys.has(notifKey) && !dismissedRideIds.has(rId) && !dismissedKeys.has(`${rId}_CUSTOMER_ACCEPTED`)) {
             dynamicNotifs.push({
               id: `${rId}_assigned`,
               notificationId: notifKey,
@@ -2315,6 +2871,15 @@ exports.getDriverNotifications = async (req, res) => {
 
     for (const n of [...storedNotifications, ...dynamicNotifs]) {
       const key = n.notificationId || (n.rideId ? `${n.rideId}_${n.type || n.status}` : String(n._id || n.id));
+      const notifCreatedDate = n.createdAt ? new Date(n.createdAt) : null;
+      const isRideAssigned = (n.type === "RIDE_ASSIGNED" || n.status === "ASSIGNED" ||
+        String(key).toUpperCase().endsWith("_ASSIGNED") ||
+        /ride assigned|ride dispatched|new ride assigned/i.test(n.title || ""));
+
+      if (isRideAssigned && notifCreatedDate && notifCreatedDate < oneDayAgo) {
+        continue; // Automatically remove ride assigned notification when one day has passed
+      }
+
       if (!seenMap.has(key) && !dismissedKeys.has(key)) {
         seenMap.add(key);
         merged.push({
@@ -2552,6 +3117,18 @@ exports.acceptRideByCustomer = async (req, res) => {
     ride.status = "Customer Accepted";
     await ride.save();
 
+    // Sync to riderequests
+    try {
+      const db = mongoose.connection.db;
+      if (db) {
+        await db.collection("riderequests").updateOne(
+          { requestId: ride.requestId },
+          { $set: ride.toObject() },
+          { upsert: true }
+        );
+      }
+    } catch (_) {}
+
     // Prepare driver target
     const dDetails = ride.assignedDriverDetails || {};
     const targetDriverId = ride.assignedDriverId || dDetails.driverId || null;
@@ -2660,6 +3237,221 @@ exports.acceptRideByCustomer = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to accept ride",
+      error: err.message
+    });
+  }
+};
+
+// 22. Get Driver Ride History (with Earnings & Metrics Summary)
+exports.getDriverRideHistory = async (req, res) => {
+  try {
+    const driverId = req.params.driverId || req.query.driverId;
+    const { status, timeframe, search, driverName } = req.query;
+
+    if (!driverId && !driverName) {
+      return res.status(400).json({
+        success: false,
+        message: "Driver ID or Driver Name is required."
+      });
+    }
+
+    let ScheduleRideModel;
+    try { ScheduleRideModel = require("../schema/ScheduleRide"); } catch (_) {}
+    let TravelTourismModel;
+    try { TravelTourismModel = require("../schema/TravelTourismRequest"); } catch (_) {}
+    let DriverHireModel;
+    try { DriverHireModel = require("../schema/DriverHireRequest"); } catch (_) {}
+
+    // Build conditions for matching the driver
+    const driverConditions = [];
+    if (driverId) {
+      driverConditions.push({ assignedDriverId: driverId });
+      driverConditions.push({ driverId: driverId });
+      driverConditions.push({ driver: driverId });
+      driverConditions.push({ assignedDriverCode: driverId });
+      driverConditions.push({ "assignedDriverDetails.driverId": driverId });
+      driverConditions.push({ "assignedDriverDetails.driverCode": driverId });
+      driverConditions.push({ assignedDriverId: new RegExp('^' + driverId + '$', 'i') });
+      if (mongoose.Types.ObjectId.isValid(driverId)) {
+        try {
+          const objId = new mongoose.Types.ObjectId(driverId);
+          driverConditions.push({ assignedDriverId: objId });
+          driverConditions.push({ driverId: objId });
+          driverConditions.push({ driver: objId });
+        } catch (_) {}
+      }
+    }
+    if (driverName) {
+      const nameReg = new RegExp('^' + driverName.trim() + '$', 'i');
+      driverConditions.push({ assignedDriverName: nameReg });
+      driverConditions.push({ "assignedDriverDetails.name": nameReg });
+    }
+
+    // Date filtering (timeframe)
+    let dateFilter = null;
+    const now = new Date();
+    if (timeframe === "today") {
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      dateFilter = { $gte: startOfDay };
+    } else if (timeframe === "week") {
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - 7);
+      dateFilter = { $gte: startOfWeek };
+    } else if (timeframe === "month") {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      dateFilter = { $gte: startOfMonth };
+    }
+
+    let baseQuery = { $or: driverConditions };
+    if (dateFilter) {
+      baseQuery.createdAt = dateFilter;
+    }
+
+    // Fetch rides from RideRequest
+    let allRides = await RideRequest.find(baseQuery).sort({ createdAt: -1 }).lean().catch(() => []);
+
+    // Also fetch from ScheduleRide if available
+    if (ScheduleRideModel) {
+      try {
+        const schedRides = await ScheduleRideModel.find(baseQuery).sort({ createdAt: -1 }).lean();
+        if (schedRides && schedRides.length > 0) {
+          allRides = allRides.concat(schedRides);
+        }
+      } catch (_) {}
+    }
+
+    // Also fetch from TravelTourismRequest if available
+    if (TravelTourismModel) {
+      try {
+        const ttRides = await TravelTourismModel.find(baseQuery).sort({ createdAt: -1 }).lean();
+        if (ttRides && ttRides.length > 0) {
+          allRides = allRides.concat(ttRides);
+        }
+      } catch (_) {}
+    }
+
+    // Also fetch from DriverHireRequest if available
+    if (DriverHireModel) {
+      try {
+        const hirRides = await DriverHireModel.find(baseQuery).sort({ createdAt: -1 }).lean();
+        if (hirRides && hirRides.length > 0) {
+          allRides = allRides.concat(hirRides);
+        }
+      } catch (_) {}
+    }
+
+    // Also fetch replacement requests
+    try {
+      const rplCol = mongoose.connection.db.collection("replacementrequests");
+      const rplDocs = await rplCol.find({ $or: driverConditions }).sort({ createdAt: -1 }).toArray();
+      for (const rpl of rplDocs) {
+        if (!allRides.some(r => r.requestId === rpl.requestId || r.requestId === rpl.rideId)) {
+          allRides.push(rpl);
+        }
+      }
+    } catch (_) {}
+
+    // Deduplicate by requestId or _id
+    const seenMap = new Map();
+    const uniqueRides = [];
+    for (const r of allRides) {
+      const key = r.requestId || (r._id ? r._id.toString() : "");
+      if (key && !seenMap.has(key)) {
+        seenMap.set(key, true);
+        uniqueRides.push(r);
+      }
+    }
+
+    // Sort by createdAt / updatedAt descending
+    uniqueRides.sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+
+    // Summary calculations
+    let totalEarnings = 0;
+    let completedCount = 0;
+    let cancelledCount = 0;
+
+    const formattedList = uniqueRides.map(ride => {
+      const st = (ride.status || "ASSIGNED").toUpperCase();
+      const isCompleted = st === "COMPLETED" || st === "PAID" || st === "FINISHED";
+      const isCancelled = st.includes("CANCEL") || st === "REJECTED";
+      const rawFare = Number(ride.fare) || 0;
+
+      if (isCompleted) {
+        totalEarnings += rawFare;
+        completedCount++;
+      } else if (isCancelled) {
+        cancelledCount++;
+      }
+
+      return {
+        _id: ride.requestId || ride._id,
+        id: ride.requestId || ride._id,
+        mongoId: ride._id,
+        requestId: ride.requestId || `REQ-${ride._id ? ride._id.toString().slice(-4) : 'RIDE'}`,
+        passengerName: ride.passengerName || "Customer",
+        passengerPhone: ride.passengerPhone || "",
+        passengerEmail: ride.passengerEmail || "",
+        pickupLocation: ride.pickupLocation || ride.pickup || "Pickup Location",
+        dropoffLocation: ride.dropoffLocation || ride.drop || "Drop-off Location",
+        startingFrom: ride.startingFrom || ride.date || "Today",
+        timeToReach: ride.timeToReach || ride.scheduledTime || "08:30 AM",
+        timeToLeave: ride.timeToLeave || "05:00 PM",
+        scheduleType: ride.scheduleType || ride.rideType || "Monthly Pick & Drop",
+        fare: rawFare,
+        fareFormatted: `Rs. ${rawFare.toLocaleString()}`,
+        status: isCompleted ? "COMPLETED" : (isCancelled ? "CANCELLED" : st),
+        statusLabel: isCompleted ? "Completed" : (isCancelled ? "Cancelled" : (ride.status || "Assigned")),
+        vehicleType: ride.vehicleType || "Sedan",
+        acPreference: ride.acPreference || "AC",
+        tripType: ride.tripType || "One Way",
+        passengersCount: ride.passengersCount || 1,
+        notes: ride.notes || "",
+        paymentMethod: ride.paymentMethod || "Cash on Completion",
+        createdAt: ride.createdAt || new Date(),
+        updatedAt: ride.updatedAt || new Date()
+      };
+    });
+
+    // Optional status filter
+    let filteredList = formattedList;
+    if (status && status.toLowerCase() !== "all") {
+      if (status.toLowerCase() === "completed") {
+        filteredList = formattedList.filter(r => r.status === "COMPLETED");
+      } else if (status.toLowerCase() === "cancelled") {
+        filteredList = formattedList.filter(r => r.status === "CANCELLED");
+      } else {
+        filteredList = formattedList.filter(r => r.status.toLowerCase() === status.toLowerCase());
+      }
+    }
+
+    // Optional search query
+    if (search && search.trim().length > 0) {
+      const q = search.trim().toLowerCase();
+      filteredList = filteredList.filter(r =>
+        r.requestId.toLowerCase().includes(q) ||
+        r.passengerName.toLowerCase().includes(q) ||
+        r.pickupLocation.toLowerCase().includes(q) ||
+        r.dropoffLocation.toLowerCase().includes(q)
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      summary: {
+        totalEarnings,
+        earningsFormatted: `Rs. ${totalEarnings.toLocaleString()}`,
+        completedCount,
+        cancelledCount,
+        totalRides: formattedList.length
+      },
+      count: filteredList.length,
+      rides: filteredList
+    });
+  } catch (err) {
+    console.error("Driver Ride History Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch driver ride history",
       error: err.message
     });
   }

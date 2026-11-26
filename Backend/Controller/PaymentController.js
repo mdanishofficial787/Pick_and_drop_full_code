@@ -31,23 +31,31 @@ exports.submitPayment = async (req, res) => {
     const cloudResult = await uploadToCloudinary(req.file.buffer, "Payments");
 
     // Fetch customer details
-    const Customer = require("../schema/user");
-    const customer = await Customer.findById(customerId);
-    const customerName = customer ? (customer.fullName || "Unknown") : "Unknown";
-    const customerPhone = customer ? (customer.PhoneNumber || "Unknown") : "Unknown";
+    let customerName = "Unknown";
+    let customerPhone = "Unknown";
+    try {
+      const Customer = require("../schema/user");
+      const customer = await Customer.findById(customerId);
+      if (customer) {
+        customerName = customer.fullName || "Unknown";
+        customerPhone = customer.PhoneNumber || customer.phone || "Unknown";
+      }
+    } catch (_) {}
 
-    const payment = new Payment({
-      customerId,
-      customerName,
-      customerPhone,
-      rideId,
-      fare,
-      paymentProofUrl: cloudResult.secure_url || cloudResult.url,
-      paymentProofId: cloudResult.public_id,
-      status: "PENDING VERIFICATION"
-    });
-
-    await payment.save();
+    const payment = await Payment.findOneAndUpdate(
+      { rideId: rideId },
+      {
+        customerId,
+        customerName,
+        customerPhone,
+        rideId,
+        fare,
+        paymentProofUrl: cloudResult.secure_url || cloudResult.url,
+        paymentProofId: cloudResult.public_id,
+        status: "PENDING VERIFICATION"
+      },
+      { upsert: true, new: true }
+    );
 
     // 1. Mark ride as Paid in RideRequest and ScheduleRide collections
     try {
@@ -129,23 +137,30 @@ exports.submitPayment = async (req, res) => {
 // 2. Get Customer Payment History (Customer)
 exports.getCustomerPayments = async (req, res) => {
   try {
-    const customerId = resolveCustomerId(req);
-    const phone = req.query?.phone;
+    const customerId = resolveCustomerId(req) || req.query.customerId;
+    const phone = req.query?.phone || (req.user ? req.user.phone || req.user.PhoneNumber : null);
     
-    let query = {};
+    let conds = [];
     if (customerId) {
-      if (phone) {
-        query = { $or: [{ customerId }, { customerPhone: phone }] };
-      } else {
-        query = { customerId };
+      conds.push({ customerId: customerId });
+      if (mongoose.Types.ObjectId.isValid(customerId)) {
+        conds.push({ customerId: new mongoose.Types.ObjectId(customerId) });
       }
-    } else if (phone) {
-      query = { customerPhone: phone };
-    } else {
-      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    if (phone) {
+      const cleanPhone = String(phone).replace(/[^0-9]/g, "");
+      conds.push({ customerPhone: phone });
+      conds.push({ customerPhone: cleanPhone });
+      if (cleanPhone.length >= 7) {
+        conds.push({ customerPhone: new RegExp(cleanPhone.slice(-9), "i") });
+      }
     }
 
-    const payments = await Payment.find(query).sort({ createdAt: -1 }).lean();
+    if (conds.length === 0) {
+      return res.status(200).json({ success: true, count: 0, data: [] });
+    }
+
+    const payments = await Payment.find({ $or: conds }).sort({ createdAt: -1 }).lean();
     return res.status(200).json({ success: true, count: payments.length, data: payments });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Server Error", error: error.message });

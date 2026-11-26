@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class LocationSuggestion {
   final String id;
@@ -173,5 +175,107 @@ class LocationService {
       latitude: lat,
       longitude: lon,
     );
+  }
+
+  /// Resolve an address or coordinate text into a LatLng object
+  static Future<LatLng?> geocodeAddress(String address, {double? fallbackLat, double? fallbackLon}) async {
+    final clean = address.trim();
+    if (clean.isEmpty) {
+      if (fallbackLat != null && fallbackLon != null) return LatLng(fallbackLat, fallbackLon);
+      return null;
+    }
+
+    // Check if it's already "lat, lon"
+    final commaParts = clean.split(',');
+    if (commaParts.length == 2) {
+      final pLat = double.tryParse(commaParts[0].trim());
+      final pLon = double.tryParse(commaParts[1].trim());
+      if (pLat != null && pLon != null && pLat >= -90 && pLat <= 90 && pLon >= -180 && pLon <= 180) {
+        return LatLng(pLat, pLon);
+      }
+    }
+
+    try {
+      final suggestions = await searchPlaces(clean, userLat: fallbackLat, userLon: fallbackLon);
+      if (suggestions.isNotEmpty) {
+        return LatLng(suggestions.first.latitude, suggestions.first.longitude);
+      }
+    } catch (_) {}
+
+    if (fallbackLat != null && fallbackLon != null) {
+      return LatLng(fallbackLat, fallbackLon);
+    }
+    return null;
+  }
+
+  /// Get driving road path coordinates between two points using free OSRM Routing API
+  static Future<Map<String, dynamic>> getDrivingRoute(LatLng origin, LatLng destination) async {
+    final url = Uri.parse(
+      'https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson',
+    );
+
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 6));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['routes'] != null && (data['routes'] as List).isNotEmpty) {
+          final route = data['routes'][0];
+          final double distanceMeters = (route['distance'] is num) ? (route['distance'] as num).toDouble() : 0.0;
+          final double durationSeconds = (route['duration'] is num) ? (route['duration'] as num).toDouble() : 0.0;
+          final coords = route['geometry']['coordinates'] as List;
+
+          final polyline = coords.map<LatLng>((c) {
+            final lon = (c[0] as num).toDouble();
+            final lat = (c[1] as num).toDouble();
+            return LatLng(lat, lon);
+          }).toList();
+
+          return {
+            'points': polyline,
+            'distanceKm': (distanceMeters / 1000.0).toStringAsFixed(1),
+            'durationMins': (durationSeconds / 60.0).round(),
+          };
+        }
+      }
+    } catch (_) {}
+
+    // Fallback: direct line if OSRM is unreachable
+    return {
+      'points': [origin, destination],
+      'distanceKm': '0.0',
+      'durationMins': 0,
+    };
+  }
+
+  /// Open external GPS Navigation in Google Maps (or browser fallback)
+  static Future<void> launchExternalNavigation({
+    required double destLat,
+    required double destLng,
+    String? destAddress,
+    double? originLat,
+    double? originLng,
+  }) async {
+    // 1. Try native Google Maps turn-by-turn navigation uri
+    final googleNavUri = Uri.parse('google.navigation:q=$destLat,$destLng&mode=d');
+
+    // 2. Fallback web / intent query
+    String webUrl = 'https://www.google.com/maps/dir/?api=1&destination=$destLat,$destLng&travelmode=driving';
+    if (originLat != null && originLng != null) {
+      webUrl += '&origin=$originLat,$originLng';
+    }
+    final webUri = Uri.parse(webUrl);
+
+    try {
+      if (await canLaunchUrl(googleNavUri)) {
+        await launchUrl(googleNavUri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    } catch (_) {}
+
+    try {
+      if (await canLaunchUrl(webUri)) {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {}
   }
 }

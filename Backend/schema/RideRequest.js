@@ -125,6 +125,22 @@ const RideRequestSchema = new mongoose.Schema(
     replacementPreferences: {
       type: mongoose.Schema.Types.Mixed,
       default: null
+    },
+    fareStatus: {
+      type: String,
+      default: ""
+    },
+    fareResponseStatus: {
+      type: String,
+      default: "Pending"
+    },
+    requestType: {
+      type: String,
+      default: "Monthly Pick & Drop"
+    },
+    category: {
+      type: String,
+      default: "Monthly Pick & Drop"
     }
   },
   {
@@ -186,4 +202,4 @@ RideRequestSchema.pre("save", async function () {
   }
 });
 
-module.exports = mongoose.model("RideRequest", RideRequestSchema);
+module.exports = mongoose.model("RideRequest", RideRequestSchema, "monthlypickanddrop");

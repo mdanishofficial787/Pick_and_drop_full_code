@@ -21,7 +21,8 @@ const {
   markDriverNotificationRead,
   dismissDriverNotification,
   clearAllDriverNotifications,
-  acceptRideByCustomer
+  acceptRideByCustomer,
+  getDriverRideHistory
 } = require("../Controller/RideController");
 
 // Suggested Routes & Match Setup
@@ -60,6 +61,8 @@ router.post("/:id/request-replacement", requestReplacementDriver);
 // Admin & Dispatch Console
 router.get("/", getAllRides);
 router.get("/dispatch-console", getAllRides);
+router.get("/driver/:driverId/history", getDriverRideHistory);
+router.get("/history/driver/:driverId", getDriverRideHistory);
 router.get("/driver/:driverId", getAllRides);
 router.get("/:id", getRideById);
 router.patch("/:id/dispatch", dispatchRide);

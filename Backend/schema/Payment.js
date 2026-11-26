@@ -3,9 +3,9 @@ const mongoose = require("mongoose");
 const PaymentSchema = new mongoose.Schema(
   {
     customerId: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: mongoose.Schema.Types.Mixed,
       ref: "Customer",
-      required: true,
+      required: false,
       index: true
     },
     customerName: {
@@ -14,7 +14,8 @@ const PaymentSchema = new mongoose.Schema(
     },
     customerPhone: {
       type: String,
-      default: "Unknown"
+      default: "Unknown",
+      index: true
     },
     rideId: {
       type: String,
@@ -27,16 +28,30 @@ const PaymentSchema = new mongoose.Schema(
     },
     paymentProofUrl: {
       type: String,
-      required: true
+      required: false,
+      default: ""
     },
     paymentProofId: {
       type: String,
-      required: true
+      required: false,
+      default: ""
     },
     status: {
       type: String,
-      enum: ["PENDING VERIFICATION", "VERIFIED", "REJECTED"],
-      default: "PENDING VERIFICATION"
+      enum: ["PENDING PAYMENT", "PENDING VERIFICATION", "VERIFIED", "REJECTED", "PAID"],
+      default: "PENDING PAYMENT"
+    },
+    pickup: {
+      type: String,
+      default: ""
+    },
+    destination: {
+      type: String,
+      default: ""
+    },
+    driverName: {
+      type: String,
+      default: ""
     },
     adminRemarks: {
       type: String,

@@ -58,6 +58,14 @@ const DriverHireRequestSchema = new mongoose.Schema(
       type: Number,
       default: 3500
     },
+    fareStatus: {
+      type: String,
+      default: ""
+    },
+    fareResponseStatus: {
+      type: String,
+      default: "Pending"
+    },
     status: {
       type: String,
       default: "Pending Dispatch",

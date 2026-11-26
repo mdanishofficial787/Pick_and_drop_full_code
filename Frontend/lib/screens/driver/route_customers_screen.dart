@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../constants/api_constants.dart';
 
 class RouteCustomersScreen extends StatefulWidget {
@@ -351,10 +353,13 @@ class _RouteCustomersScreenState extends State<RouteCustomersScreen> {
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: Text(
-                        '$routeName: $pickupPoint → $dropoffPoint',
+                        (routeName.contains('→') || routeName.contains('->') || routeName.trim() == '$pickupPoint → $dropoffPoint')
+                            ? routeName
+                            : '$routeName: $pickupPoint → $dropoffPoint',
                         style: GoogleFonts.inter(
                           fontWeight: FontWeight.bold,
                           fontSize: 15,
@@ -362,6 +367,7 @@ class _RouteCustomersScreenState extends State<RouteCustomersScreen> {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
@@ -380,28 +386,40 @@ class _RouteCustomersScreenState extends State<RouteCustomersScreen> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                Row(
+                Wrap(
+                  spacing: 14,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Icon(Icons.access_time_rounded, size: 15, color: Colors.grey[600]),
-                    const SizedBox(width: 5),
-                    Text(
-                      timeRange,
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.grey[700],
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.access_time_rounded, size: 15, color: Colors.grey[600]),
+                        const SizedBox(width: 5),
+                        Text(
+                          timeRange,
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 16),
-                    Icon(Icons.groups_rounded, size: 16, color: Colors.grey[600]),
-                    const SizedBox(width: 5),
-                    Text(
-                      '${_customers.length} requested customers',
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.grey[700],
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.groups_rounded, size: 16, color: Colors.grey[600]),
+                        const SizedBox(width: 5),
+                        Text(
+                          '${_customers.length} requested ${_customers.length == 1 ? "customer" : "customers"}',
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.grey[700],
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -409,13 +427,17 @@ class _RouteCustomersScreenState extends State<RouteCustomersScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Estimated Total Route Fare:',
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        color: Colors.grey[600],
+                    Flexible(
+                      child: Text(
+                        'Estimated Total Route Fare:',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: Colors.grey[600],
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Text(
                       'Rs. ${totalFare.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}',
                       style: GoogleFonts.inter(
@@ -443,12 +465,16 @@ class _RouteCustomersScreenState extends State<RouteCustomersScreen> {
                     color: const Color(0xFF334155),
                   ),
                 ),
-                const Spacer(),
-                Text(
-                  _isAccepted ? 'All customers notified' : 'Tap Accept below to notify all',
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    color: _isAccepted ? const Color(0xFF16A34A) : Colors.grey[600],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _isAccepted ? 'All customers notified' : 'Tap card to view details • Accept to notify',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      color: _isAccepted ? const Color(0xFF16A34A) : Colors.grey[600],
+                    ),
+                    textAlign: TextAlign.end,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -541,14 +567,42 @@ class _RouteCustomersScreenState extends State<RouteCustomersScreen> {
     );
   }
 
+  void _copyPhoneNumber(String phoneNumber) {
+    final clean = phoneNumber.trim();
+    if (clean.isEmpty || clean == 'Not provided') return;
+    Clipboard.setData(ClipboardData(text: clean));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: Color(0xFF4ADE80), size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Copied $clean to clipboard',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: const Color(0xFF0F172A),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   Widget _buildCustomerCard(Map<String, dynamic> cust, int serial) {
-    final name = cust['customerName'] ?? cust['name'] ?? 'Customer $serial';
-    final phone = cust['phone'] ?? '+92 300 0000000';
-    final pickup = cust['pickupLocation'] ?? cust['pickup'] ?? 'Pickup Point';
-    final dropoff = cust['dropoffLocation'] ?? cust['dropoff'] ?? 'Drop Point';
-    final time = cust['time'] ?? 'Flexible';
-    final fare = cust['fareFormatted'] ?? (cust['fare'] != null ? 'Rs. ${cust['fare']}' : 'Rs. 9,500');
-    final reqId = cust['requestId'] ?? 'REQ-${8030 + serial}';
+    final name = (cust['customerName'] ?? cust['name'] ?? cust['passengerName'] ?? 'Customer $serial').toString();
+    final phone = (cust['phone'] ?? cust['passengerPhone'] ?? '+92 300 0000000').toString();
+    final pickup = (cust['pickupLocation'] ?? cust['pickup'] ?? 'Pickup Point').toString();
+    final dropoff = (cust['dropoffLocation'] ?? cust['dropoff'] ?? cust['destination'] ?? 'Drop Point').toString();
+    final time = (cust['time'] ?? cust['travelTime'] ?? cust['timeToReach'] ?? 'Flexible').toString();
+    final fare = (cust['fareFormatted'] ?? (cust['fare'] != null ? 'Rs. ${cust['fare']}' : 'Rs. 7,000')).toString();
+    final reqId = (cust['requestId'] ?? cust['id'] ?? 'REQ-${8030 + serial}').toString();
     final isCustomerAccepted = _isAccepted || cust['status'] == 'ACCEPTED';
 
     // Initials for avatar
@@ -557,63 +611,188 @@ class _RouteCustomersScreenState extends State<RouteCustomersScreen> {
         ? '${parts[0][0]}${parts[1][0]}'.toUpperCase()
         : (name.isNotEmpty ? name.substring(0, 1).toUpperCase() : 'C');
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _showCustomerDetailsDialog(cust, serial),
+        onLongPress: () => _copyPhoneNumber(phone),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isCustomerAccepted ? const Color(0xFFBBF7D0) : Colors.grey.shade200,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Row 1: Avatar, Name, Phone, and Status Badge
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: const Color(0xFFEFF6FF),
-                child: Text(
-                  initials,
-                  style: GoogleFonts.inter(
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF007BFF),
-                    fontSize: 12,
-                  ),
-                ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isCustomerAccepted ? const Color(0xFFBBF7D0) : Colors.grey.shade200,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.02),
+                blurRadius: 4,
+                offset: const Offset(0, 1),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
+            ],
+          ),
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Row 1: Avatar, Name, Phone, and Status Badge
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: const Color(0xFFEFF6FF),
+                    child: Text(
+                      initials,
                       style: GoogleFonts.inter(
                         fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: const Color(0xFF0F172A),
+                        color: const Color(0xFF007BFF),
+                        fontSize: 12,
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Row(
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.phone_outlined, size: 12, color: Colors.grey),
-                        const SizedBox(width: 4),
                         Text(
-                          phone,
+                          name,
                           style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: Colors.grey[600],
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: const Color(0xFF0F172A),
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _copyPhoneNumber(phone),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.phone_rounded, size: 12, color: Color(0xFF007BFF)),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    phone,
+                                    style: GoogleFonts.inter(
+                                      fontSize: 12,
+                                      color: const Color(0xFF1E293B),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF007BFF).withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.copy_rounded, size: 10, color: Color(0xFF007BFF)),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        'COPY',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                          color: const Color(0xFF007BFF),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: isCustomerAccepted ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          isCustomerAccepted ? '✅ Accepted' : 'Pending',
+                          style: GoogleFonts.inter(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                            color: isCustomerAccepted ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        reqId,
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          color: Colors.grey[500],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // Row 2: Pickup and Dropoff
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.circle, size: 10, color: Color(0xFF16A34A)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            pickup,
+                            style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF334155)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Padding(
+                      padding: EdgeInsets.only(left: 4),
+                      child: SizedBox(
+                        height: 8,
+                        child: VerticalDivider(width: 1, color: Colors.grey),
+                      ),
+                    ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.location_on, size: 12, color: Color(0xFFDC2626)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            dropoff,
+                            style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF334155)),
                           ),
                         ),
                       ],
@@ -621,116 +800,590 @@ class _RouteCustomersScreenState extends State<RouteCustomersScreen> {
                   ],
                 ),
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: isCustomerAccepted ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      isCustomerAccepted ? '✅ Accepted' : 'Pending',
-                      style: GoogleFonts.inter(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.bold,
-                        color: isCustomerAccepted ? const Color(0xFF16A34A) : const Color(0xFFD97706),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    reqId,
-                    style: GoogleFonts.inter(
-                      fontSize: 10,
-                      color: Colors.grey[500],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
+              const SizedBox(height: 10),
 
-          // Row 2: Pickup and Dropoff
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Column(
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.circle, size: 10, color: Color(0xFF16A34A)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        pickup,
-                        style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF334155)),
-                      ),
-                    ),
-                  ],
-                ),
-                const Padding(
-                  padding: EdgeInsets.only(left: 4),
-                  child: SizedBox(
-                    height: 8,
-                    child: VerticalDivider(width: 1, color: Colors.grey),
-                  ),
-                ),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.location_on, size: 12, color: Color(0xFFDC2626)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        dropoff,
-                        style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF334155)),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-
-          // Row 3: Scheduled time & Fare
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
+              // Row 3: Scheduled time, View Data indicator & Fare
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Icon(Icons.access_time, size: 13, color: Colors.grey[600]),
-                  const SizedBox(width: 4),
-                  Text(
-                    time,
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: Colors.grey[700],
-                      fontWeight: FontWeight.w500,
-                    ),
+                  Row(
+                    children: [
+                      Icon(Icons.access_time, size: 13, color: Colors.grey[600]),
+                      const SizedBox(width: 4),
+                      Text(
+                        time,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: Colors.grey[700],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFFBFDBFE)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.visibility_outlined, size: 11, color: Color(0xFF007BFF)),
+                            const SizedBox(width: 3),
+                            Text(
+                              'View Data',
+                              style: GoogleFonts.inter(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF007BFF),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        fare,
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF007BFF),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-              Text(
-                fare,
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF007BFF),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Opens comprehensive customer data dialog when tapping on any person card
+  void _showCustomerDetailsDialog(Map<String, dynamic> cust, int serial) {
+    final name = (cust['customerName'] ?? cust['name'] ?? cust['passengerName'] ?? 'Customer $serial').toString();
+    final phone = (cust['phone'] ?? cust['passengerPhone'] ?? 'Not provided').toString();
+    final email = (cust['email'] ?? cust['passengerEmail'] ?? '').toString();
+    final pickup = (cust['pickupLocation'] ?? cust['pickup'] ?? 'Pickup Point').toString();
+    final dropoff = (cust['dropoffLocation'] ?? cust['dropoff'] ?? cust['destination'] ?? 'Drop Point').toString();
+    final time = (cust['time'] ?? cust['travelTime'] ?? cust['timeToReach'] ?? _currentRoute['timeRange'] ?? 'Flexible').toString();
+    final date = (cust['date'] ?? cust['travelDate'] ?? cust['startingFrom'] ?? cust['startDate'] ?? '').toString();
+    final fare = (cust['fareFormatted'] ?? (cust['fare'] != null ? 'Rs. ${cust['fare']}' : 'Rs. 7,000')).toString();
+    final reqId = (cust['requestId'] ?? cust['id'] ?? 'REQ-${8030 + serial}').toString();
+    final vehicleType = (cust['vehicleType'] ?? cust['vehicle'] ?? 'Standard').toString();
+    final isCustomerAccepted = _isAccepted || cust['status'] == 'ACCEPTED';
+    final notes = (cust['notes'] ?? cust['instructions'] ?? cust['additionalDetails'] ?? '').toString();
+
+    // Initials for avatar
+    final parts = name.trim().split(' ');
+    final initials = parts.length > 1
+        ? '${parts[0][0]}${parts[1][0]}'.toUpperCase()
+        : (name.isNotEmpty ? name.substring(0, 1).toUpperCase() : 'C');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+        child: Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.85,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 18, 16, 16),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(24),
+                    topRight: Radius.circular(24),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 22,
+                      backgroundColor: const Color(0xFFEFF6FF),
+                      child: Text(
+                        initials,
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF007BFF),
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: GoogleFonts.inter(
+                              fontSize: 16.5,
+                              fontWeight: FontWeight.bold,
+                              color: const Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _copyPhoneNumber(phone),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEFF6FF),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: const Color(0xFFBFDBFE)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.phone_rounded, size: 12, color: Color(0xFF007BFF)),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      phone,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 12.5,
+                                        color: const Color(0xFF1E293B),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF007BFF),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.copy_rounded, size: 10, color: Colors.white),
+                                        const SizedBox(width: 2.5),
+                                        Text(
+                                          'COPY',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, color: Colors.grey),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Status & Request ID Row
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: isCustomerAccepted ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isCustomerAccepted ? Icons.check_circle_rounded : Icons.schedule_rounded,
+                                  size: 13,
+                                  color: isCustomerAccepted ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  isCustomerAccepted ? 'Accepted' : 'Pending Acceptance',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: isCustomerAccepted ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                            ),
+                            child: Text(
+                              'ID: $reqId',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF334155),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 16),
+                      Text(
+                        'TRIP ROUTE',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5,
+                          color: const Color(0xFF94A3B8),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Route Container
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 2),
+                                  child: Icon(Icons.circle, size: 11, color: Color(0xFF16A34A)),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Pickup Location',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 11,
+                                          color: const Color(0xFF64748B),
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        pickup,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 12.5,
+                                          color: const Color(0xFF0F172A),
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.only(left: 4.5),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: SizedBox(
+                                  height: 14,
+                                  child: VerticalDivider(width: 2, thickness: 1.5, color: Color(0xFFCBD5E1)),
+                                ),
+                              ),
+                            ),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 2),
+                                  child: Icon(Icons.location_on_rounded, size: 14, color: Color(0xFFDC2626)),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Drop-off Location',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 11,
+                                          color: const Color(0xFF64748B),
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        dropoff,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 12.5,
+                                          color: const Color(0xFF0F172A),
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+                      Text(
+                        'RIDE DETAILS',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5,
+                          color: const Color(0xFF94A3B8),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Details Card
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Column(
+                          children: [
+                            if (phone.isNotEmpty && phone != 'Not provided') ...[
+                              _buildDetailRow(
+                                Icons.phone_rounded,
+                                'Customer Phone',
+                                phone,
+                                trailingWidget: InkWell(
+                                  onTap: () => _copyPhoneNumber(phone),
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFEFF6FF),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: const Color(0xFFBFDBFE)),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.copy_rounded, size: 11, color: Color(0xFF007BFF)),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          'COPY',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.bold,
+                                            color: const Color(0xFF007BFF),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const Divider(height: 14),
+                            ],
+                            _buildDetailRow(
+                              Icons.access_time_rounded,
+                              'Pickup Time',
+                              time,
+                            ),
+                            if (date.isNotEmpty) ...[
+                              const Divider(height: 14),
+                              _buildDetailRow(
+                                Icons.calendar_today_rounded,
+                                'Travel Date',
+                                date,
+                              ),
+                            ],
+                            const Divider(height: 14),
+                            _buildDetailRow(
+                              Icons.payments_outlined,
+                              'Estimated Fare',
+                              fare,
+                              valueColor: const Color(0xFF16A34A),
+                              isBold: true,
+                            ),
+                            if (vehicleType.isNotEmpty) ...[
+                              const Divider(height: 14),
+                              _buildDetailRow(
+                                Icons.directions_car_rounded,
+                                'Vehicle Type',
+                                vehicleType,
+                              ),
+                            ],
+                            if (email.isNotEmpty) ...[
+                              const Divider(height: 14),
+                              _buildDetailRow(
+                                Icons.email_outlined,
+                                'Email',
+                                email,
+                              ),
+                            ],
+                            if (notes.isNotEmpty) ...[
+                              const Divider(height: 14),
+                              _buildDetailRow(
+                                Icons.notes_rounded,
+                                'Instructions',
+                                notes,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Bottom Actions
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 18),
+                child: Row(
+                  children: [
+                    if (phone.isNotEmpty && phone != 'Not provided') ...[
+                      Expanded(
+                        child: SizedBox(
+                          height: 44,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFEFF6FF),
+                              foregroundColor: const Color(0xFF007BFF),
+                              elevation: 0,
+                              side: const BorderSide(color: Color(0xFFBFDBFE)),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                            ),
+                            onPressed: () => _copyPhoneNumber(phone),
+                            icon: const Icon(Icons.copy_rounded, size: 14),
+                            label: Text(
+                              'COPY NUMBER',
+                              style: GoogleFonts.inter(fontSize: 11.5, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SizedBox(
+                          height: 44,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFDCFCE7),
+                              foregroundColor: const Color(0xFF16A34A),
+                              elevation: 0,
+                              side: const BorderSide(color: Color(0xFFBBF7D0)),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                            ),
+                            onPressed: () async {
+                              final cleanedPhone = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+                              final uri = Uri.parse('tel:$cleanedPhone');
+                              if (await canLaunchUrl(uri)) {
+                                await launchUrl(uri);
+                              }
+                            },
+                            icon: const Icon(Icons.phone_rounded, size: 14),
+                            label: Text(
+                              'CALL',
+                              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    Expanded(
+                      child: SizedBox(
+                        height: 44,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF007BFF),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            elevation: 0,
+                          ),
+                          onPressed: () => Navigator.pop(ctx),
+                          child: Text(
+                            'CLOSE',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-        ],
+        ),
       ),
+    );
+  }
+
+  Widget _buildDetailRow(IconData icon, String label, String value, {Color? valueColor, bool isBold = false, Widget? trailingWidget}) {
+    return Row(
+      children: [
+        Icon(icon, size: 15, color: const Color(0xFF64748B)),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: GoogleFonts.inter(fontSize: 12.5, color: const Color(0xFF64748B)),
+        ),
+        const Spacer(),
+        Flexible(
+          child: Text(
+            value,
+            style: GoogleFonts.inter(
+              fontSize: 12.5,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
+              color: valueColor ?? const Color(0xFF0F172A),
+            ),
+            textAlign: TextAlign.end,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (trailingWidget != null) ...[
+          const SizedBox(width: 6),
+          trailingWidget,
+        ],
+      ],
     );
   }
 }

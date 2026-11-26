@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../common/ride_navigation_screen.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:ride_and_serve/constants/api_constants.dart';
@@ -162,11 +163,52 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       _socket?.on('ride-updated', (data) => _handleRideUpdatedSocket(data));
       _socket?.on('ride-update', (data) => _handleRideUpdatedSocket(data));
       _socket?.on('ride_updated', (data) => _handleRideUpdatedSocket(data));
+      _socket?.on('fare-updated', (data) => _handleRideUpdatedSocket(data));
+      _socket?.on('fare_updated', (data) => _handleRideUpdatedSocket(data));
+      _socket?.on('price-updated', (data) => _handleRideUpdatedSocket(data));
+      _socket?.on('price_updated', (data) => _handleRideUpdatedSocket(data));
+
+      _socket?.on('ride-completed', (data) => _handleRideUpdatedSocket(data));
+      _socket?.on('ride_completed', (data) => _handleRideUpdatedSocket(data));
+      _socket?.on('trip-completed', (data) => _handleRideUpdatedSocket(data));
+      _socket?.on('trip_completed', (data) => _handleRideUpdatedSocket(data));
 
       _socket?.on('ride_accepted', (data) => _handleRideAcceptedSocket(data));
       _socket?.on('ride-accepted', (data) => _handleRideAcceptedSocket(data));
-      _socket?.on('customer-notification', (data) => _handleRideAcceptedSocket(data));
-      _socket?.on('customer_notification', (data) => _handleRideAcceptedSocket(data));
+      _socket?.on('customer-notification', (data) {
+        final Map rawPayload = data is Map ? data : {};
+        final status = (rawPayload['status'] ?? (rawPayload['ride'] is Map ? rawPayload['ride']['status'] : '')).toString();
+        if (status == 'PRICE_UPDATED' ||
+            status == 'Price Updated' ||
+            rawPayload['type'] == 'PRICE_UPDATED' ||
+            rawPayload['type'] == 'FARE_UPDATED' ||
+            rawPayload['fareUpdated'] == true ||
+            status == 'COMPLETED' ||
+            status == 'Completed' ||
+            rawPayload['type'] == 'RIDE_COMPLETED' ||
+            rawPayload['type'] == 'TRIP_COMPLETED') {
+          _handleRideUpdatedSocket(data);
+        } else {
+          _handleRideAcceptedSocket(data);
+        }
+      });
+      _socket?.on('customer_notification', (data) {
+        final Map rawPayload = data is Map ? data : {};
+        final status = (rawPayload['status'] ?? (rawPayload['ride'] is Map ? rawPayload['ride']['status'] : '')).toString();
+        if (status == 'PRICE_UPDATED' ||
+            status == 'Price Updated' ||
+            rawPayload['type'] == 'PRICE_UPDATED' ||
+            rawPayload['type'] == 'FARE_UPDATED' ||
+            rawPayload['fareUpdated'] == true ||
+            status == 'COMPLETED' ||
+            status == 'Completed' ||
+            rawPayload['type'] == 'RIDE_COMPLETED' ||
+            rawPayload['type'] == 'TRIP_COMPLETED') {
+          _handleRideUpdatedSocket(data);
+        } else {
+          _handleRideAcceptedSocket(data);
+        }
+      });
     } catch (_) {}
   }
 
@@ -298,6 +340,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
             'pickup': pickupLocation,
             'destination': dropoffLocation,
             'isRead': false,
+            'createdAt': DateTime.now().toIso8601String(),
           };
 
           setState(() {
@@ -328,10 +371,21 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       final currentUserPhone = _currentUser?.phoneNumber ?? '';
       final currentUserEmail = _currentUser?.email ?? '';
 
+      bool isPhoneMatch(String p1, String p2) {
+        if (p1.isEmpty || p2.isEmpty) return false;
+        final d1 = p1.replaceAll(RegExp(r'[^0-9]'), '');
+        final d2 = p2.replaceAll(RegExp(r'[^0-9]'), '');
+        if (d1.isEmpty || d2.isEmpty) return false;
+        if (d1 == d2) return true;
+        final c1 = d1.length >= 9 ? d1.substring(d1.length - 9) : d1;
+        final c2 = d2.length >= 9 ? d2.substring(d2.length - 9) : d2;
+        return c1 == c2;
+      }
+
       bool matchesUser = false;
       if (currentUserId.isNotEmpty && customerId == currentUserId) matchesUser = true;
-      if (currentUserPhone.isNotEmpty && passengerPhone == currentUserPhone) matchesUser = true;
-      if (currentUserEmail.isNotEmpty && passengerEmail == currentUserEmail) matchesUser = true;
+      if (currentUserPhone.isNotEmpty && passengerPhone.isNotEmpty && isPhoneMatch(passengerPhone, currentUserPhone)) matchesUser = true;
+      if (currentUserEmail.isNotEmpty && passengerEmail.isNotEmpty && currentUserEmail.toLowerCase().trim() == passengerEmail.toLowerCase().trim()) matchesUser = true;
 
       if (!matchesUser && payloadId.isNotEmpty) {
         matchesUser = _notifications.any((n) =>
@@ -386,7 +440,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
             });
             _showRideCompletedBanner(notifObj);
           }
-        } else if ((status == 'PRICE_UPDATED' || status == 'Price Updated') && rawFare != null) {
+        } else if ((status == 'PRICE_UPDATED' || status == 'Price Updated' || (rawPayload['status'] ?? '').toString() == 'PRICE_UPDATED' || (rawPayload['type'] ?? '').toString() == 'PRICE_UPDATED' || (rawPayload['type'] ?? '').toString() == 'FARE_UPDATED' || rideObj['fareUpdated'] == true || rawPayload['fareUpdated'] == true) && rawFare != null) {
           final String fareText = rawFare.toString();
           final String statusKey = '${payloadId}_FARE_UPDATED_$fareText';
 
@@ -480,13 +534,27 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
           seenInThisBatch.add(notifUniqueKey);
           notif['notifKey'] = notifUniqueKey;
 
-          // 0. Recency filter: ignore notifications older than 48 hours
+          // 0. Recency filter: ignore notifications older than 48 hours, and automatically remove ride assigned notifications older than 24 hours (1 day)
           final createdAtRaw = notif['createdAt'] ?? notif['time'];
           if (createdAtRaw != null) {
             try {
               final parsedDate = DateTime.tryParse(createdAtRaw.toString());
-              if (parsedDate != null && DateTime.now().difference(parsedDate).inHours > 48) {
-                continue;
+              if (parsedDate != null) {
+                final diff = DateTime.now().difference(parsedDate);
+                final bool isRideAssigned = status == 'ACCEPTED' ||
+                    status == 'ASSIGNED' ||
+                    cleanKey.endsWith('_accepted') ||
+                    cleanKey.endsWith('_assigned') ||
+                    (notif['title'] ?? '').toString().toLowerCase().contains('driver assigned') ||
+                    (notif['title'] ?? '').toString().toLowerCase().contains('ride assigned');
+
+                // If 1 day has passed (24 hours), automatically remove ride assigned notification
+                if (isRideAssigned && diff.inHours >= 24) {
+                  continue;
+                }
+                if (diff.inHours > 48) {
+                  continue;
+                }
               }
             } catch (_) {}
           }
@@ -529,6 +597,10 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
               if (status == 'ACCEPTED' || status == 'Accepted') {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (mounted) _showDriverAcceptedDialog(notif);
+                });
+              } else if (status == 'PRICE_UPDATED' || status == 'Price Updated') {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) _showFareUpdatedBanner(notif);
                 });
               }
             }
@@ -845,6 +917,11 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   // Fare Updated Top Banner pop-up
   void _showFareUpdatedBanner(Map<String, dynamic> notif) {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    final fareText = (notif['fareFormatted'] ?? '').toString();
+    final String subtitleText = fareText.isNotEmpty
+        ? 'Admin updated your ride fare to $fareText. Tap to confirm.'
+        : (notif['subtitle'] ?? 'Admin updated your ride fare. Tap to confirm.');
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         elevation: 8,
@@ -852,7 +929,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
         margin: const EdgeInsets.only(top: 40, left: 16, right: 16),
         backgroundColor: const Color(0xFF0F172A),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        duration: const Duration(seconds: 7),
+        duration: const Duration(seconds: 10),
         content: Row(
           children: [
             Container(
@@ -875,7 +952,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    notif['subtitle'] ?? 'Admin has updated your ride price.',
+                    subtitleText,
                     style: const TextStyle(fontSize: 12, color: Colors.white70),
                     maxLines: 2,
                   ),
@@ -885,9 +962,11 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
           ],
         ),
         action: SnackBarAction(
-          label: 'VIEW',
+          label: 'CONFIRM',
           textColor: const Color(0xFFF59E0B),
-          onPressed: _showNotificationListModal,
+          onPressed: () {
+            _showFareApprovalDialog(notif);
+          },
         ),
       ),
     );
@@ -897,6 +976,11 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   // Ride Completed Top Banner pop-up
   void _showRideCompletedBanner(Map<String, dynamic> notif) {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    final fareText = (notif['fareFormatted'] ?? '').toString();
+    final String subtitleText = fareText.isNotEmpty
+        ? 'Please tap to pay ride fare of $fareText.'
+        : (notif['subtitle'] ?? 'Please submit your payment for this ride.');
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         elevation: 8,
@@ -904,37 +988,51 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
         margin: const EdgeInsets.only(top: 40, left: 16, right: 16),
         backgroundColor: const Color(0xFF1959F6),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        duration: const Duration(seconds: 8),
-        content: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
+        duration: const Duration(seconds: 10),
+        content: InkWell(
+          onTap: () async {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => PaymentDetailsScreen(rideData: notif),
               ),
-              child: const Icon(Icons.check_circle_rounded, color: Color(0xFF1959F6), size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    notif['title'] ?? 'Ride Completed!',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    notif['subtitle'] ?? 'Please submit your payment.',
-                    style: const TextStyle(fontSize: 12, color: Colors.white70),
-                    maxLines: 2,
-                  ),
-                ],
+            );
+            await _loadDismissedNotifications();
+            await _syncPaidRides();
+            _fetchCustomerNotifications();
+          },
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.check_circle_rounded, color: Color(0xFF1959F6), size: 22),
               ),
-            ),
-          ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      notif['title'] ?? '💳 Ride Completed - Pay Fare',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitleText,
+                      style: const TextStyle(fontSize: 12, color: Colors.white70),
+                      maxLines: 2,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
         action: SnackBarAction(
           label: 'PAY',
@@ -1406,8 +1504,38 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                             backgroundColor: _primaryBlue,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
-                          icon: const Icon(Icons.check_rounded, color: Colors.white),
-                          label: const Text('OKAY, GOT IT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+                          icon: const Icon(Icons.navigation_rounded, color: Colors.white),
+                          label: const Text('TRACK RIDE ON MAP', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+                          onPressed: () {
+                            Navigator.pop(context);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => RideNavigationScreen(
+                                  rideId: (notif['rideId'] ?? notif['requestId'] ?? notif['id'] ?? '').toString(),
+                                  pickupAddress: pickup,
+                                  dropoffAddress: destination,
+                                  passengerName: _currentUser?.fullName ?? 'Passenger',
+                                  passengerPhone: _currentUser?.phoneNumber ?? '',
+                                  driverName: (notif['driverName'] ?? notif['assignedDriverName'] ?? 'Driver').toString(),
+                                  driverPhone: (notif['driverPhone'] ?? notif['phone'] ?? '').toString(),
+                                  isDriver: false,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 44,
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            side: BorderSide(color: Colors.grey.shade300),
+                          ),
+                          child: const Text('CLOSE', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.black54)),
                           onPressed: () => Navigator.pop(context),
                         ),
                       ),
@@ -1653,7 +1781,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                           child: CircularProgressIndicator(),
                         )
                       else ...[
-                        // ACCEPT FARE BUTTON
+                        // CONFIRM FARE BUTTON
                         SizedBox(
                           width: double.infinity,
                           height: 48,
@@ -1665,7 +1793,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                             ),
                             icon: const Icon(Icons.check_circle_rounded, color: Colors.white),
                             label: const Text(
-                              'ACCEPT FARE',
+                              'CONFIRM FARE',
                               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white, letterSpacing: 0.5),
                             ),
                             onPressed: () async {
@@ -1725,6 +1853,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       final baseUrl = ApiConstants.baseUrl;
       final rideId = notif['requestId'] ?? notif['id'] ?? notif['rideId'] ?? '';
       final customerName = _currentUser?.fullName ?? _currentUser?.phoneNumber ?? 'Customer';
+      final customerPhone = _currentUser?.phoneNumber ?? '';
 
       await http.post(
         Uri.parse('$baseUrl/api/rides/respond-fare'),
@@ -1739,13 +1868,29 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
       final isAccept = action == 'ACCEPT';
       final statusText = isAccept ? 'Fare Accepted' : 'Fare Rejected';
 
+      // Also call customer-accept endpoint if accepted to ensure driver notifications fire
+      if (isAccept) {
+        try {
+          http.post(
+            Uri.parse('$baseUrl/api/rides/customer-accept'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({
+              'rideId': rideId,
+              'customerId': _currentUser?.id,
+              'customerName': customerName,
+              'customerPhone': customerPhone,
+            }),
+          ).catchError((_) => http.Response('{}', 500));
+        } catch (_) {}
+      }
+
       final String rId = (notif['requestId'] ?? notif['id'] ?? notif['rideId'] ?? '').toString();
       final String notifKey = (notif['notifKey'] ?? notif['notificationId'] ?? notif['id'] ?? '${rId}_price_updated').toString();
 
       setState(() {
         notif['fareResponseStatus'] = statusText;
         notif['subtitle'] = isAccept
-            ? 'You accepted the fare of ${notif['fareFormatted'] ?? ''}. Admin notified!'
+            ? 'You confirmed the fare of ${notif['fareFormatted'] ?? ''}. Driver notified!'
             : 'You rejected the fare of ${notif['fareFormatted'] ?? ''}. Admin notified!';
         _dismissedNotifIds.addAll([
           notifKey,
@@ -1786,7 +1931,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
             backgroundColor: isAccept ? const Color(0xFF10B981) : const Color(0xFFEF4444),
             content: Text(
               isAccept
-                  ? '✅ Fare Accepted! Admin will assign driver shortly.'
+                  ? '✅ Fare Confirmed! Driver and Admin have been notified.'
                   : '❌ Fare Rejected. Admin has been notified.',
               style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
             ),
@@ -1809,6 +1954,28 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   void _showNotificationListModal() {
     setState(() {
       _unreadCount = 0;
+      // Filter out any ride assigned notification where 1 day has passed (24 hours)
+      _notifications.removeWhere((notif) {
+        final status = (notif['status'] ?? '').toString().toUpperCase();
+        final key = (notif['notifKey'] ?? notif['notificationId'] ?? notif['id'] ?? '').toString().toLowerCase();
+        final title = (notif['title'] ?? '').toString().toLowerCase();
+        final bool isRideAssigned = status == 'ACCEPTED' ||
+            status == 'ASSIGNED' ||
+            key.endsWith('_accepted') ||
+            key.endsWith('_assigned') ||
+            title.contains('driver assigned') ||
+            title.contains('ride assigned');
+        if (!isRideAssigned) return false;
+
+        final createdAtRaw = notif['createdAt'] ?? notif['time'];
+        if (createdAtRaw != null) {
+          final parsedDate = DateTime.tryParse(createdAtRaw.toString());
+          if (parsedDate != null && DateTime.now().difference(parsedDate).inHours >= 24) {
+            return true;
+          }
+        }
+        return false;
+      });
     });
 
     showModalBottomSheet(

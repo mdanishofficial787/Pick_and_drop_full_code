@@ -37,7 +37,8 @@ class ReportIssueScreen extends StatefulWidget {
 }
 
 class _PassengerItem {
-  final String id;
+  final String id;        // MongoDB _id
+  final String requestId; // Human-readable requestId (e.g. REQ-8031)
   final String name;
   final String initials;
   final String seat;
@@ -50,6 +51,7 @@ class _PassengerItem {
 
   _PassengerItem({
     required this.id,
+    this.requestId = '',
     required this.name,
     required this.initials,
     required this.seat,
@@ -205,6 +207,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
           final map = Map<String, dynamic>.from(r);
           final id = (map['_id'] ?? map['requestId'] ?? map['id'] ?? '')
               .toString();
+          final reqId = (map['requestId'] ?? map['id'] ?? '').toString();
           if (id.isEmpty || seen.contains(id)) continue;
 
           String name = '';
@@ -266,6 +269,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
           items.add(
             _PassengerItem(
               id: id,
+              requestId: reqId,
               name: name,
               initials: _PassengerItem.computeInitials(name),
               seat: 'Seat $seatCounter',
@@ -454,7 +458,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                           p.reasonNote = '';
                         });
                         Navigator.pop(ctx);
-                        _savePassengerIssueToDb(p);
+
                       },
                       borderRadius: BorderRadius.circular(12),
                       child: Container(
@@ -486,7 +490,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                   ],
 
                   Text(
-                    'Choose Issue / Reason (Saves immediately to DB):',
+                    'Choose Issue / Reason for ${p.name}:',
                     style: GoogleFonts.inter(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
@@ -520,7 +524,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                             p.reasonNote = title;
                           });
                           Navigator.pop(ctx);
-                          _savePassengerIssueToDb(p);
+  
                         },
                         borderRadius: BorderRadius.circular(10),
                         child: Container(
@@ -564,89 +568,6 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
     );
   }
 
-  Future<void> _savePassengerIssueToDb(_PassengerItem p) async {
-    try {
-      final payload = {
-        'driverId': widget.driverId ?? '6a97ba8860eec88e497bd6c7',
-        'driverName': widget.driverName ?? 'Driver',
-        'mode': 'Separate',
-        'issueType': p.reasonNote.isNotEmpty ? p.reasonNote : _selectedIssueType,
-        'reason': p.reasonNote.isNotEmpty ? p.reasonNote : _selectedIssueType,
-        'reasonNote': p.reasonNote,
-        'passengerId': p.id,
-        'customerName': p.name,
-        'customerPhone': p.phone,
-        'canBePicked': p.canBePicked,
-        'passengers': [
-          {
-            'id': p.id,
-            'name': p.name,
-            'seat': p.seat,
-            'canBePicked': p.canBePicked,
-            'reasonNote': p.reasonNote,
-            'phone': p.phone,
-            'pickup': p.pickup,
-            'drop': p.drop,
-          }
-        ],
-      };
-
-      final res = await http.post(
-        Uri.parse(kReportIssueEndpoint),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 6));
-
-      if (mounted) {
-        if (res.statusCode == 200 || res.statusCode == 201) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  Icon(
-                    p.canBePicked ? Icons.check_circle_rounded : Icons.info_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      p.canBePicked
-                          ? '${p.name} marked as Can be picked (Saved in DB)'
-                          : 'Saved in DB: ${p.reasonNote} for ${p.name}',
-                      style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: p.canBePicked ? const Color(0xFF059669) : const Color(0xFF1E3A8A),
-              duration: const Duration(seconds: 2),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to save in DB: ${res.statusCode}'),
-              backgroundColor: const Color(0xFFDC2626),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving in DB: $e'),
-            backgroundColor: const Color(0xFFDC2626),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-  }
-
   Future<void> _submitIssue() async {
     final selectedPassengers = _selectedMode == 1
         ? _passengers
@@ -669,6 +590,11 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
     setState(() => _isSubmitting = true);
 
     try {
+      // Build the top-level requestId from first selected passenger's requestId
+      final firstP = selectedPassengers.first;
+      final topRequestId = widget.requestId ??
+          (firstP.requestId.isNotEmpty ? firstP.requestId : firstP.id);
+
       final payload = {
         'driverId': widget.driverId ?? '6a97ba8860eec88e497bd6c7',
         'driverName': widget.driverName ?? 'Driver',
@@ -677,8 +603,14 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
         'reason': _selectedIssueType,
         'message': _messageController.text.trim(),
         'details': _messageController.text.trim(),
+        // Top-level requestId so backend can link to the RideRequest document
+        'requestId': topRequestId,
+        if (widget.rideId != null && widget.rideId!.isNotEmpty)
+          'rideId': widget.rideId,
         'passengers': selectedPassengers.map((p) => {
-              'id': p.id,
+              'id': p.requestId.isNotEmpty ? p.requestId : p.id,
+              'requestId': p.requestId,
+              'mongoId': p.id,
               'name': p.name,
               'seat': p.seat,
               'canBePicked': p.canBePicked,
@@ -1366,7 +1298,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
             ),
             const SizedBox(width: 6),
             Text(
-              'Message to Passenger(s)',
+              'Message to Admin',
               style: GoogleFonts.inter(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w700,
@@ -1469,7 +1401,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'Send to Passenger(s)',
+                    'Send to Admin',
                     style: GoogleFonts.inter(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,

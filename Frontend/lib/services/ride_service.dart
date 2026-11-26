@@ -16,7 +16,9 @@ class MonthlyRideResponse {
 
   factory MonthlyRideResponse.fromJson(Map<String, dynamic> json) {
     final rideData = json['ride'] ?? json['data'];
-    final reqId = rideData != null ? rideData['requestId']?.toString() : null;
+    final reqId = rideData != null && rideData['requestId'] != null
+        ? rideData['requestId']?.toString()
+        : json['requestId']?.toString();
     return MonthlyRideResponse(
       success: json['success'] == true,
       message: json['message']?.toString() ?? '',

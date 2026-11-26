@@ -46,7 +46,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     // Call the backend to create the request
     try {
       final response = await http.post(
-        Uri.parse('http://localhost:3000/password/send-otp'),
+        Uri.parse('https://pick-and-drop-full-code.vercel.app/password/send-otp'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'Email': phone,
@@ -91,7 +91,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
             try {
               final res = await http.get(
-                Uri.parse('http://localhost:3000/password/status?email=$phone'),
+                Uri.parse('https://pick-and-drop-full-code.vercel.app/password/status?email=$phone'),
               );
               if (res.statusCode == 200) {
                 final body = jsonDecode(res.body);

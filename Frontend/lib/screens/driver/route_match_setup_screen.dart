@@ -580,8 +580,6 @@ class _RouteMatchSetupScreenState extends State<RouteMatchSetupScreen> {
     required Map<String, dynamic> route,
   }) {
     final rawRouteName = (route['routeName'] ?? 'Route ${String.fromCharCode(65 + index)}').toString().trim(); final bool hasRouteArrow = rawRouteName.contains('→') || rawRouteName.contains('➔') || rawRouteName.contains('->'); final bool isGenericRoute = RegExp(r'^route\s+[a-z0-9]+$', caseSensitive: false).hasMatch(rawRouteName); final String displayCardTitle = (isGenericRoute && (route['pickupPoint'] ?? 'Pickup Point') != 'Pickup Point') ? '$rawRouteName: ${route['pickupPoint']} → ${route['dropoffPoint']}' : (hasRouteArrow ? rawRouteName : '${route['pickupPoint'] ?? 'Pickup Point'} → ${route['dropoffPoint'] ?? 'Drop Point'}');
-    final pickupPoint = route['pickupPoint'] ?? 'Pickup Point';
-    final dropoffPoint = route['dropoffPoint'] ?? 'Drop Point';
     final timeRange = route['timeRange'] ?? '7:00 AM - 9:00 AM';
     final count = (route['customers'] as List?)?.length ?? route['customerCount'] ?? 8;
     final isAccepted = route['status'] == 'ACCEPTED';
@@ -696,7 +694,10 @@ class _RouteMatchSetupScreenState extends State<RouteMatchSetupScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   InkWell(
-                    onTap: () => _togglePreferred(index),
+                    onTap: () {
+                      _togglePreferred(index);
+                      _openRouteCustomers(route, index);
+                    },
                     borderRadius: BorderRadius.circular(8),
                     child: Container(
                       padding: const EdgeInsets.all(8),

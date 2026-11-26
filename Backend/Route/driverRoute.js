@@ -76,17 +76,9 @@ router.get(
   }
 );
 
-// 9. REPORT AN ISSUE
+// 9. REPORT AN ISSUE (single canonical route)
 router.post(
   "/report-issue",
-  reportIssue
-);
-router.post(
-  "/report_issue",
-  reportIssue
-);
-router.post(
-  "/issue",
   reportIssue
 );
 

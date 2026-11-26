@@ -1,4 +1,6 @@
+import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +13,7 @@ import 'manage_availability_screen.dart';
 import 'ride_management_screen.dart';
 import 'report_issue_screen.dart';
 import 'profile_settings_screen.dart';
+import 'driver_ride_history_screen.dart';
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -46,6 +49,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   int _unreadCount = 0;
   final Set<String> _seenNotificationKeys = {};
   final Set<String> _dismissedNotifIds = {};
+  final Set<String> _shownAssignmentPopupIds = {};
+  bool _isDialogShowing = false;
   bool _isFirstFetch = true;
 
   @override
@@ -85,30 +90,125 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
 
       _socket?.onConnect((_) {
         debugPrint('Driver Socket connected to $baseUrl');
-        if (activeDriverId.isNotEmpty) {
-          _socket?.emit('join-driver', activeDriverId);
-          _socket?.emit('join', activeDriverId);
-          _socket?.emit('join-room', activeDriverId);
-          _socket?.emit('join-room', 'driver_$activeDriverId');
-        }
-        if (currentDriverName.isNotEmpty) {
-          _socket?.emit('join-driver', currentDriverName);
-          _socket?.emit('join-room', 'driver_$currentDriverName');
+        final idsToJoin = <String>{
+          if (activeDriverId.isNotEmpty) activeDriverId,
+          if (activeDriverId.isNotEmpty) 'driver-$activeDriverId',
+          if (activeDriverId.isNotEmpty) 'driver_$activeDriverId',
+          if (currentDriverName.isNotEmpty) currentDriverName,
+          if (currentDriverName.isNotEmpty) 'driver-$currentDriverName',
+          if (currentDriverName.isNotEmpty) 'driver_$currentDriverName',
+        };
+
+        for (final room in idsToJoin) {
+          _socket?.emit('join', room);
+          _socket?.emit('join-driver', room);
+          _socket?.emit('join-room', room);
         }
       });
 
+      final assignEvents = [
+        'new-assignment',
+        'ride-assigned',
+        'ride-dispatched',
+        'new-notification',
+        'driver-notification',
+        'new_assignment',
+        'ride_assigned',
+        'ride_dispatched',
+        'new_notification',
+        'schedule-ride-dispatched',
+        'schedule-ride-update',
+        'driver-hire-dispatched',
+        'driver-hire-update',
+        'travel-request-dispatched',
+        'travel-request-update',
+      ];
+
+      for (final ev in assignEvents) {
+        _socket?.on(ev, (data) {
+          debugPrint('Live Assignment event [$ev] received: $data');
+          _handleIncomingAssignment(data);
+        });
+      }
       _socket?.on('customer-accepted-ride', (data) => _handleIncomingNotification(data));
-      _socket?.on('driver-notification', (data) => _handleIncomingNotification(data));
-      _socket?.on('ride-dispatched', (data) {
-        if (data is Map) {
-          _handleIncomingNotification(data['notification'] ?? data['ride'] ?? data);
-        }
-      });
-      _socket?.on('ride-updated', (data) {
-        if (data is Map) {
-          _handleIncomingNotification(data['notification'] ?? data['ride'] ?? data);
-        }
-      });
+      _socket?.on('ride-updated', (data) => _handleIncomingAssignment(data));
+    } catch (e) {
+      debugPrint('Driver socket error: $e');
+    }
+  }
+
+  void _handleIncomingAssignment(dynamic data) {
+    if (!mounted || data == null) return;
+    try {
+      Map<String, dynamic> rawObj = (data is Map) ? Map<String, dynamic>.from(data) : {};
+      if (rawObj['data'] is Map) rawObj = Map<String, dynamic>.from(rawObj['data']);
+      if (rawObj['ride'] is Map) rawObj = Map<String, dynamic>.from(rawObj['ride']);
+      if (rawObj['payload'] is Map) rawObj = Map<String, dynamic>.from(rawObj['payload']);
+      if (rawObj['request'] is Map) rawObj = Map<String, dynamic>.from(rawObj['request']);
+      if (rawObj['notification'] is Map) {
+        final notif = Map<String, dynamic>.from(rawObj['notification']);
+        rawObj = {...notif, ...rawObj};
+      }
+
+      final String notifId = (rawObj['notificationId'] ?? rawObj['id'] ?? rawObj['rideId'] ?? rawObj['requestId'] ?? '').toString();
+      final String targetDriver = (rawObj['driverId'] ?? rawObj['assignedDriverId'] ?? '').toString();
+      final String targetDriverName = (rawObj['driverName'] ?? rawObj['assignedDriverName'] ?? '').toString();
+      final String targetDriverCode = (rawObj['driverCode'] ?? rawObj['driverReferenceId'] ?? '').toString().trim().toLowerCase();
+
+      final myId = widget.driverId ?? '';
+      final myName = currentDriverName.trim().toLowerCase();
+      bool isForMe = false;
+      if (myId.isNotEmpty && targetDriver.isNotEmpty && targetDriver == myId) isForMe = true;
+      if (myId.isNotEmpty && targetDriverCode.isNotEmpty && (targetDriverCode == myId.toLowerCase() || targetDriverCode == myName)) isForMe = true;
+      if (myName.isNotEmpty && targetDriverName.isNotEmpty && (targetDriverName.toLowerCase() == myName || targetDriverName.toLowerCase().contains(myName))) isForMe = true;
+
+      // Customer requests with no assigned driver go ONLY to Admin console, NEVER directly to driver
+      if (targetDriver.isEmpty && targetDriverName.isEmpty && targetDriverCode.isEmpty) {
+        return;
+      }
+
+      if (!isForMe) return;
+
+      final String status = (rawObj['status'] ?? rawObj['rawStatus'] ?? '').toString().toUpperCase();
+      if (status == 'COMPLETED' || status == 'PAID' || status == 'CANCELLED' || status == 'REJECTED' || status == 'PENDING DISPATCH' || status == 'PENDING') {
+        return;
+      }
+
+      final String reqId = (rawObj['requestId'] ?? rawObj['rideId'] ?? notifId).toString();
+      final String notifKey = reqId.isNotEmpty ? reqId : 'driver_notif_${DateTime.now().millisecondsSinceEpoch}';
+      if (_dismissedNotifIds.contains(notifKey)) return;
+
+      if (!_seenNotificationKeys.contains(notifKey)) {
+        _seenNotificationKeys.add(notifKey);
+        rawObj['notifKey'] = notifKey;
+        setState(() {
+          _notifications.insert(0, rawObj);
+          _unreadCount++;
+        });
+      }
+
+      final isAssignment = status == 'ASSIGNED' ||
+          status == 'AWAITING DRIVER ACCEPTANCE' ||
+          status == 'DISPATCHED' ||
+          (rawObj['type'] ?? '') == 'NEW_ASSIGNMENT' ||
+          (rawObj['type'] ?? '') == 'RIDE_ASSIGNED';
+
+      if (isAssignment && !_shownAssignmentPopupIds.contains(reqId) && !_isDialogShowing) {
+        _shownAssignmentPopupIds.add(reqId);
+        _playAlertAndVibrate();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _showRideAssignmentDialog(rawObj);
+        });
+      }
+    } catch (e) {
+      debugPrint('Error handling incoming assignment: $e');
+    }
+  }
+
+  void _playAlertAndVibrate() {
+    try {
+      SystemSound.play(SystemSoundType.alert);
+      HapticFeedback.heavyImpact();
     } catch (_) {}
   }
 
@@ -133,6 +233,17 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       final String status = (rawObj['status'] ?? '').toString().toUpperCase();
       if (status == 'COMPLETED' || status == 'PAID' || status == 'CANCELLED' || status == 'REJECTED') {
         return;
+      }
+
+      // Check if 1 day has passed for ride assigned notifications
+      final createdAtRaw = rawObj['createdAt'] ?? rawObj['time'] ?? rawObj['timestamp'];
+      if (createdAtRaw != null) {
+        final dt = DateTime.tryParse(createdAtRaw.toString());
+        if (dt != null && DateTime.now().difference(dt).inHours >= 24) {
+          return;
+        }
+      } else {
+        rawObj['createdAt'] = DateTime.now().toIso8601String();
       }
 
       final String notifKey = notifId.isNotEmpty ? notifId : 'driver_notif_${DateTime.now().millisecondsSinceEpoch}';
@@ -199,9 +310,21 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
               _seenNotificationKeys.add(nKey);
               if (!isInitialLoad) {
                 newlyArrived++;
-                if ((notif['title'] ?? '').toString().contains('Customer Accepted') || (notif['type'] ?? '') == 'CUSTOMER_ACCEPTED') {
+                final String status = (notif['status'] ?? '').toString().toUpperCase();
+                final String type = (notif['type'] ?? '').toString().toUpperCase();
+                final String title = (notif['title'] ?? '').toString();
+
+                if (title.contains('Customer Accepted') || type == 'CUSTOMER_ACCEPTED') {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (mounted) _showCustomerAcceptedBanner(notif);
+                  });
+                } else if ((status == 'ASSIGNED' || type == 'NEW_ASSIGNMENT' || type == 'RIDE_ASSIGNED') &&
+                    !_shownAssignmentPopupIds.contains(nKey) &&
+                    !_isDialogShowing) {
+                  _shownAssignmentPopupIds.add(nKey);
+                  _playAlertAndVibrate();
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) _showRideAssignmentDialog(notif);
                   });
                 }
               }
@@ -225,6 +348,26 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
             // Exclude route matching notifications (Route Matching feature removed)
             if (type.contains('ROUTE') || title.contains('route match') || title.contains('route setup')) {
               return false;
+            }
+
+            // Automatically remove ride assigned notification when 1 day has passed (24 hours)
+            final bool isRideAssigned = type == 'RIDE_ASSIGNED' ||
+                status == 'ASSIGNED' ||
+                key.toUpperCase().endsWith('_ASSIGNED') ||
+                title.contains('ride assigned') ||
+                title.contains('ride dispatched');
+
+            final createdAtRaw = n['createdAt'] ?? n['time'] ?? n['timestamp'];
+            if (createdAtRaw != null) {
+              try {
+                final parsedDate = DateTime.tryParse(createdAtRaw.toString());
+                if (parsedDate != null) {
+                  final diff = DateTime.now().difference(parsedDate);
+                  if (isRideAssigned && diff.inHours >= 24) {
+                    return false;
+                  }
+                }
+              } catch (_) {}
             }
 
             return !_dismissedNotifIds.contains(key) &&
@@ -398,6 +541,28 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   void _showNotificationListModal() {
     setState(() {
       _unreadCount = 0;
+      // Filter out any ride assigned notification where 1 day has passed (24 hours)
+      _notifications.removeWhere((n) {
+        final type = (n['type'] ?? '').toString().toUpperCase();
+        final status = (n['status'] ?? '').toString().toUpperCase();
+        final title = (n['title'] ?? '').toString().toLowerCase();
+        final key = (n['notifKey'] ?? n['notificationId'] ?? n['id'] ?? '').toString().toUpperCase();
+        final bool isRideAssigned = type == 'RIDE_ASSIGNED' ||
+            status == 'ASSIGNED' ||
+            key.endsWith('_ASSIGNED') ||
+            title.contains('ride assigned') ||
+            title.contains('ride dispatched');
+        if (!isRideAssigned) return false;
+
+        final createdAtRaw = n['createdAt'] ?? n['time'] ?? n['timestamp'];
+        if (createdAtRaw != null) {
+          final dt = DateTime.tryParse(createdAtRaw.toString());
+          if (dt != null && DateTime.now().difference(dt).inHours >= 24) {
+            return true;
+          }
+        }
+        return false;
+      });
     });
 
     showModalBottomSheet(
@@ -643,7 +808,22 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                               trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
                               onTap: () {
                                 Navigator.pop(context);
-                                _showRideAcceptedDetailsDialog(notif);
+                                final type = (notif['type'] ?? '').toString().toUpperCase();
+                                final status = (notif['status'] ?? '').toString().toUpperCase();
+                                if (type == 'NEW_ASSIGNMENT' || type == 'RIDE_ASSIGNED' || status == 'ASSIGNED') {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => RideManagementScreen(
+                                        driverId: widget.driverId,
+                                        driverName: currentDriverName,
+                                        initialTabIndex: 1,
+                                      ),
+                                    ),
+                                  );
+                                } else {
+                                  _showRideAcceptedDetailsDialog(notif);
+                                }
                               },
                             ),
                           ),
@@ -655,6 +835,336 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         ),
       ),
     );
+  }
+
+  void _copyCustomerPhone(String phone) {
+    final clean = phone.trim();
+    if (clean.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: clean));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: Color(0xFF4ADE80), size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Copied $clean to clipboard',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: const Color(0xFF0F172A),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _respondToRideAssignment(String rideId, String status) async {
+    try {
+      final currentDriverId = (widget.driverId != null && widget.driverId!.isNotEmpty)
+          ? widget.driverId!
+          : "6a97ba8860eec88e497bd6c7";
+
+      final headers = {'Content-Type': 'application/json'};
+      final bodyData = jsonEncode({
+        'status': status,
+        'rawStatus': status,
+        'driverId': currentDriverId,
+        'driverName': currentDriverName,
+      });
+
+      http.Response response = await http.put(
+        Uri.parse('$kBaseUrl/api/requests/$rideId'),
+        headers: headers,
+        body: bodyData,
+      ).timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 404) {
+        response = await http.put(
+          Uri.parse('$kBaseUrl/api/rides/status/$rideId'),
+          headers: headers,
+          body: bodyData,
+        ).timeout(const Duration(seconds: 8));
+      }
+
+      debugPrint('Ride $rideId response status: ${response.statusCode}');
+    } catch (e) {
+      debugPrint('Error responding to ride: $e');
+    }
+  }
+
+  void _showRideAssignmentDialog(Map<String, dynamic> notif) {
+    if (_isDialogShowing) return;
+    _isDialogShowing = true;
+
+    final String reqId = (notif['requestId'] ?? notif['rideId'] ?? notif['id'] ?? 'REQ-NEW').toString();
+    final String passName = (notif['passengerName'] ?? notif['customerName'] ?? notif['name'] ?? 'Passenger').toString();
+    final String passPhone = (notif['passengerPhone'] ?? notif['customerPhone'] ?? notif['phone'] ?? '').toString();
+
+    String pickup = (notif['pickupLocation'] is Map
+        ? notif['pickupLocation']['address']?.toString()
+        : (notif['pickupLocation']?.toString() ?? notif['pickup']?.toString() ?? 'Pickup Location')) ?? '';
+    if (pickup.isEmpty) pickup = 'Pickup Location';
+
+    String dropoff = (notif['dropoffLocation'] is Map
+        ? notif['dropoffLocation']['address']?.toString()
+        : (notif['dropoffLocation']?.toString() ?? notif['drop']?.toString() ?? notif['destination']?.toString() ?? 'Drop-off Location')) ?? '';
+    if (dropoff.isEmpty) dropoff = 'Drop-off Location';
+
+    final String fare = (notif['fareFormatted'] ?? (notif['fare'] != null ? 'Rs. ${NumberFormat("#,##0").format(num.tryParse(notif['fare'].toString()) ?? 0)}' : 'Rs. 9,500')).toString();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        contentPadding: const EdgeInsets.all(22),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1959F6).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.directions_car_rounded, color: Color(0xFF1959F6), size: 28),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '🚗 New Ride Assignment!',
+                    style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: const Color(0xFF1959F6)),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Request ID: $reqId',
+                    style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF6B7280)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundColor: const Color(0xFF1959F6).withValues(alpha: 0.1),
+                    child: const Icon(Icons.person_rounded, size: 22, color: Color(0xFF1959F6)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          passName,
+                          style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w700, color: const Color(0xFF1F2937)),
+                        ),
+                        if (passPhone.isNotEmpty)
+                          Text(
+                            passPhone,
+                            style: GoogleFonts.inter(fontSize: 12, color: Colors.grey.shade600),
+                          ),
+                      ],
+                    ),
+                  ),
+                  if (passPhone.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.phone_in_talk_rounded, color: Color(0xFF10B981), size: 22),
+                      tooltip: 'Call Passenger',
+                      onPressed: () async {
+                        final uri = Uri.parse('tel:$passPhone');
+                        if (await canLaunchUrl(uri)) await launchUrl(uri);
+                      },
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF9FAFB),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.circle, size: 10, color: Color(0xFF10B981)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          pickup,
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: const Color(0xFF374151)),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Container(width: 2, height: 16, color: Colors.grey.shade300),
+                    ),
+                  ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.location_on_rounded, size: 14, color: Color(0xFFDC2626)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          dropoff,
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500, color: const Color(0xFF374151)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDF4),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF86EFAC)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Trip Fare',
+                    style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF15803D)),
+                  ),
+                  Text(
+                    fare,
+                    style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w800, color: const Color(0xFF15803D)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () {
+                    _isDialogShowing = false;
+                    Navigator.of(ctx).pop();
+                    _respondToRideAssignment(reqId, 'REJECTED');
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Ride $reqId declined')),
+                    );
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFDC2626),
+                    side: const BorderSide(color: Color(0xFFDC2626)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text('Decline'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    _isDialogShowing = false;
+                    Navigator.of(ctx).pop();
+                    _respondToRideAssignment(reqId, 'ACCEPTED');
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('🎉 Ride $reqId accepted!'),
+                        backgroundColor: const Color(0xFF15803D),
+                      ),
+                    );
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => RideManagementScreen(
+                          driverId: widget.driverId,
+                          driverName: currentDriverName,
+                          initialTabIndex: 0,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.check_rounded, size: 18),
+                  label: const Text('Accept Ride'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1959F6),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton.icon(
+              onPressed: () {
+                _isDialogShowing = false;
+                Navigator.of(ctx).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => RideManagementScreen(
+                      driverId: widget.driverId,
+                      driverName: currentDriverName,
+                      initialTabIndex: 1,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.inbox_rounded, size: 18, color: AppColors.primaryBlue),
+              label: const Text(
+                'View in Ride Management (Requests)',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  color: AppColors.primaryBlue,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    ).then((_) {
+      _isDialogShowing = false;
+    });
   }
 
   // Open Detailed Dialog for Driver when tapping a notification
@@ -730,16 +1240,37 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
                                 ),
                                 const SizedBox(height: 3),
-                                Text(
-                                  custPhone.isNotEmpty ? custPhone : 'Verified Passenger',
-                                  style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                                InkWell(
+                                  onTap: custPhone.isNotEmpty ? () => _copyCustomerPhone(custPhone) : null,
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          custPhone.isNotEmpty ? custPhone : 'Verified Passenger',
+                                          style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                                        ),
+                                      ),
+                                      if (custPhone.isNotEmpty) ...[
+                                        const SizedBox(width: 6),
+                                        const Icon(Icons.copy_rounded, size: 13, color: AppColors.primaryBlue),
+                                      ],
+                                    ],
+                                  ),
                                 ),
                               ],
                             ),
                           ),
-                          if (custPhone.isNotEmpty)
+                          if (custPhone.isNotEmpty) ...[
                             IconButton(
-                              icon: const Icon(Icons.phone_in_talk_rounded, color: Color(0xFF10B981), size: 26),
+                              icon: const Icon(Icons.copy_rounded, color: AppColors.primaryBlue, size: 20),
+                              tooltip: 'Copy Number',
+                              onPressed: () => _copyCustomerPhone(custPhone),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.phone_in_talk_rounded, color: Color(0xFF10B981), size: 24),
+                              tooltip: 'Call Passenger',
                               onPressed: () async {
                                 final uri = Uri.parse('tel:$custPhone');
                                 if (await canLaunchUrl(uri)) {
@@ -747,6 +1278,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                 }
                               },
                             ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -936,6 +1468,12 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
             if (fetchedEmail != null && fetchedEmail.trim().isNotEmpty) {
               await prefs.setString('saved_driver_email$keySuffix', fetchedEmail.trim());
               await prefs.setString('driver_email', fetchedEmail.trim());
+            }
+            final fetchedRefId = (d['driverReferenceId'] ?? d['driverCode'] ?? '').toString();
+            if (fetchedRefId.trim().isNotEmpty) {
+              await prefs.setString('saved_driver_reference_id$keySuffix', fetchedRefId.trim());
+              await prefs.setString('driver_reference_id', fetchedRefId.trim());
+              await prefs.setString('driver_code', fetchedRefId.trim());
             }
           } catch (_) {}
         }
@@ -1265,6 +1803,42 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                       const SizedBox(height: 16),
                                       ListTile(
                                         leading: const Icon(
+                                          Icons.all_inbox_rounded,
+                                          color: Color(0xFF1959F6),
+                                        ),
+                                        title: Text(
+                                          'All Rides & Requests',
+                                          style: GoogleFonts.inter(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        subtitle: Text(
+                                          'View all incoming requests and active rides',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 12,
+                                            color: Colors.grey.shade600,
+                                          ),
+                                        ),
+                                        onTap: () {
+                                          Navigator.pop(ctx);
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  RideManagementScreen(
+                                                    driverId: widget.driverId,
+                                                    driverName: currentDriverName,
+                                                    filterPrefix: null,
+                                                    moduleName:
+                                                        'All Rides & Requests',
+                                                    initialTabIndex: 1,
+                                                  ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                      const Divider(height: 1),
+                                      ListTile(
+                                        leading: const Icon(
                                           Icons.calendar_month_rounded,
                                           color: Color(0xFF1959F6),
                                         ),
@@ -1285,7 +1859,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                                                     filterPrefix: 'REQ-',
                                                     moduleName:
                                                         'Monthly Pick & Drop',
-                                                    initialTabIndex: 0,
+                                                    initialTabIndex: 1,
                                                   ),
                                             ),
                                           );
@@ -1400,15 +1974,34 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                         const SizedBox(height: 12),
 
 
-                        // Profile View
+                        // Card 5: Ride History
                         _buildMenuCard(
                           context: context,
                           icon: Icons.history_rounded,
-                          title: 'Profile View',
-                          subtitle: 'View your past rides and invoices.',
-                          onTap: _openProfileSettings,
+                          title: 'Ride History',
+                          subtitle: 'View your past trips, earnings, and status.',
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => DriverRideHistoryScreen(
+                                  driverId: widget.driverId ?? '',
+                                  driverName: currentDriverName,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                         const SizedBox(height: 14),
+
+                        // Card 6: Profile View
+                        _buildMenuCard(
+                          context: context,
+                          icon: Icons.person_rounded,
+                          title: 'Profile View',
+                          subtitle: 'View and update your driver profile settings.',
+                          onTap: _openProfileSettings,
+                        ),
+                        const SizedBox(height: 12),
 
                         // Need Assistance Card
                         Container(

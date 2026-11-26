@@ -1,4 +1,4 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 if (!process.env.JWT_SECRET) {
   process.env.JWT_SECRET = "86b625c3b62ef67474b1f3e9d33126e2e068ad7a7c87123da95b87216b281a2d5d50f623e114e84178bb8b24df40488120e803d6019d032c4028114d55e79872";
 }
@@ -47,14 +47,21 @@ app.set("io", io);
 
 // Socket.IO connection handler
 io.on("connection", (socket) => {
-  console.log("🔌 Socket connected via WebSocket:", socket.id);
+  console.log("ðŸ”Œ Socket connected via WebSocket:", socket.id);
 
   socket.on("join-customer", (customerId) => {
     if (customerId) {
       const roomStr = String(customerId);
       socket.join(`customer_${roomStr}`);
       socket.join(roomStr);
-      console.log(`👤 Customer joined socket room: customer_${roomStr}`);
+      console.log(`ðŸ‘¤ Customer joined socket room: customer_${roomStr}`);
+    }
+  });
+
+  socket.on("driver-location-update", (data) => {
+    if (data && data.rideId) {
+      const rideStr = String(data.rideId);
+      socket.to(`ride_${rideStr}`).to(rideStr).emit("driver-location-updated", data);
     }
   });
 
@@ -63,12 +70,12 @@ io.on("connection", (socket) => {
       const rideStr = String(rideId);
       socket.join(`ride_${rideStr}`);
       socket.join(rideStr);
-      console.log(`🚗 Joined ride socket room: ride_${rideStr}`);
+      console.log(`ðŸš— Joined ride socket room: ride_${rideStr}`);
     }
   });
 
   socket.on("disconnect", () => {
-    console.log("❌ Socket disconnected:", socket.id);
+    console.log("âŒ Socket disconnected:", socket.id);
   });
 });
 
@@ -83,14 +90,14 @@ const LocalDBurl = process.env.LOCAL_MONGO_URL || "mongodb://127.0.0.1:27017/rid
 async function connectDB() {
   try {
     await mongoose.connect(DBurl);
-    console.log("✅ MongoDB Atlas connected successfully!");
+    console.log("âœ… MongoDB Atlas connected successfully!");
   } catch (err) {
-    console.warn("⚠️ MongoDB Atlas connection error. Falling back to Local MongoDB:", err.message);
+    console.warn("âš ï¸ MongoDB Atlas connection error. Falling back to Local MongoDB:", err.message);
     try {
       await mongoose.connect(LocalDBurl);
-      console.log("✅ Local MongoDB connected successfully!");
+      console.log("âœ… Local MongoDB connected successfully!");
     } catch (localErr) {
-      console.error("❌ Fatal MongoDB connection error:", localErr.message);
+      console.error("âŒ Fatal MongoDB connection error:", localErr.message);
     }
   }
 }
@@ -106,17 +113,62 @@ async function fixStaleIndexes() {
     const badIndex = indexes.find(idx => idx.name === "notificationId_1");
     if (badIndex) {
       await collection.dropIndex("notificationId_1");
-      console.log("🔧 Fixed: Dropped stale index 'notificationId_1' from customernotifications");
+      console.log("ðŸ”§ Fixed: Dropped stale index 'notificationId_1' from customernotifications");
     }
   } catch (err) {
     // Non-fatal - log but don't crash
-    console.warn("⚠️ Index fix notice:", err.message);
+    console.warn("âš ï¸ Index fix notice:", err.message);
   }
 }
 
-    connectDB().then(async () => {
-      await fixStaleIndexes();
-      try {
+    // Automatically remove ride assigned notifications older than 1 day (24 hours)
+async function cleanOneDayOldAssignedNotifications() {
+  try {
+    const db = mongoose.connection.db;
+    if (!db) return;
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const delDriverAssigned = await db.collection("drivernotifications").deleteMany({
+      $and: [
+        {
+          $or: [
+            { type: "RIDE_ASSIGNED" },
+            { status: "ASSIGNED" },
+            { notificationId: { $regex: "_ASSIGNED$", $options: "i" } },
+            { title: { $regex: "Ride Assigned|Ride Dispatched", $options: "i" } }
+          ]
+        },
+        { createdAt: { $lt: oneDayAgo } }
+      ]
+    });
+
+    const delCustAssigned = await db.collection("customernotifications").deleteMany({
+      $and: [
+        {
+          $or: [
+            { notificationId: { $regex: "_ACCEPTED$|_ASSIGNED$", $options: "i" } },
+            { title: { $regex: "Driver Assigned", $options: "i" } },
+            { status: { $regex: "^ASSIGNED$|^ACCEPTED$", $options: "i" } }
+          ]
+        },
+        { createdAt: { $lt: oneDayAgo } }
+      ]
+    });
+
+    if (delDriverAssigned.deletedCount > 0 || delCustAssigned.deletedCount > 0) {
+      console.log(`ðŸ§¹ Auto-removed 1-day old ride assigned notifications: ${delDriverAssigned.deletedCount} driver notifs, ${delCustAssigned.deletedCount} customer notifs.`);
+    }
+  } catch (err) {
+    console.warn("âš ï¸ 1-day old notification cleanup notice:", err.message);
+  }
+}
+
+connectDB().then(async () => {
+  await fixStaleIndexes();
+  await cleanOneDayOldAssignedNotifications();
+  // Schedule hourly cleanup for 1-day old assigned notifications
+  setInterval(cleanOneDayOldAssignedNotifications, 60 * 60 * 1000);
+  try {
         const db = mongoose.connection.db;
         // Clean up mock/stale notifications from drivernotifications
         const delDriver = await db.collection("drivernotifications").deleteMany({
@@ -138,7 +190,7 @@ async function fixStaleIndexes() {
           ]
         });
 
-        console.log(`🧹 Cleaned stale notifications: ${delDriver.deletedCount} driver notifs, ${delCust.deletedCount} customer notifs.`);
+        console.log(`ðŸ§¹ Cleaned stale notifications: ${delDriver.deletedCount} driver notifs, ${delCust.deletedCount} customer notifs.`);
       } catch (e) {
         console.error("Cleanup notifs error:", e);
       }
@@ -197,6 +249,7 @@ app.use("/api/driver-selection", rideRoutes);
 
 // 4. Register Routes (Driver & Vehicle)
 app.use("/driver", driverRoutes);
+app.use("/api/driver", driverRoutes);
 app.use("/vehicle", vehicleRoutes);
 app.use("/password", driverPasswordRoutes);
 app.use("/admin/auth", adminAuthRoutes);
@@ -228,8 +281,8 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
   server.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 Backend Server running on http://0.0.0.0:${PORT} (REST + WebSocket)`);
-    console.log(`🔌 Socket.IO ready for real-time Admin Portal updates`);
+    console.log(`ðŸš€ Backend Server running on http://0.0.0.0:${PORT} (REST + WebSocket)`);
+    console.log(`ðŸ”Œ Socket.IO ready for real-time Admin Portal updates`);
   });
 }
 

@@ -1,4 +1,4 @@
-const Driver = require("../schema/Driver");
+﻿const Driver = require("../schema/Driver");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const cloudinary = require("../config/cloudinary");
@@ -582,6 +582,8 @@ const reportIssue = async (req, res) => {
 
     await newIssue.save();
 
+    // IssueReport saved to its own collection. No extra sync needed.
+
     // 4. Update RideRequest documents in DB for affected passengers
     const updatedRideIds = [];
     if (passengersList.length > 0) {
@@ -612,12 +614,28 @@ const reportIssue = async (req, res) => {
         }
 
         let updatedRide = null;
-        if (pId) {
-          const idQuery = [];
+        // Try all available identifiers: requestId string, mongoId (_id), and p.id
+        const idQuery = [];
+        // 1. p.requestId (e.g. "REQ-8031") â€” most reliable
+        if (p.requestId && p.requestId.trim()) {
+          idQuery.push({ requestId: p.requestId.trim() });
+        }
+        // 2. p.id (could be requestId or mongoId â€” try both)
+        if (pId && pId !== p.requestId) {
           if (mongoose.Types.ObjectId.isValid(pId)) {
             idQuery.push({ _id: new mongoose.Types.ObjectId(pId) });
           }
           idQuery.push({ requestId: pId });
+        }
+        // 3. p.mongoId â€” explicit MongoDB _id from Flutter
+        if (p.mongoId && mongoose.Types.ObjectId.isValid(p.mongoId)) {
+          idQuery.push({ _id: new mongoose.Types.ObjectId(p.mongoId) });
+        }
+        // 4. Top-level requestId from body (single-passenger reports)
+        if (requestId && requestId !== p.requestId && requestId !== pId) {
+          idQuery.push({ requestId: requestId });
+        }
+        if (idQuery.length > 0) {
           updatedRide = await RideRequest.findOneAndUpdate(
             { $or: idQuery },
             { $set: updateSet },

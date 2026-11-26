@@ -113,21 +113,44 @@ exports.createScheduleRide = async (req, res) => {
 // 2. Get All Schedule Ride Requests (Admin Console)
 exports.getAllScheduleRides = async (req, res) => {
   try {
-    const { status, search } = req.query;
+    const { status, search, driverId, driverName } = req.query;
     let query = {};
 
     if (status) {
-      query.status = status.toLowerCase() === "pending" ? "Pending Dispatch" : status;
+      const s = status.toLowerCase();
+      query.status = s === "pending" ? "Pending Dispatch" : (s === "assigned" ? "ASSIGNED" : status);
+    }
+
+    if (driverId) {
+      const driverConditions = [
+        { assignedDriverId: driverId },
+        { driverId: driverId }
+      ];
+      if (driverName && driverName.trim().length > 0) {
+        driverConditions.push({ assignedDriverName: { $regex: driverName.trim(), $options: "i" } });
+      }
+      if (query.$or) {
+        query.$and = [{ $or: query.$or }, { $or: driverConditions }];
+        delete query.$or;
+      } else {
+        query.$or = driverConditions;
+      }
     }
 
     if (search) {
-      query.$or = [
+      const searchConditions = [
         { requestId: { $regex: search, $options: "i" } },
         { passengerName: { $regex: search, $options: "i" } },
         { passengerPhone: { $regex: search, $options: "i" } },
         { pickupLocation: { $regex: search, $options: "i" } },
         { dropoffLocation: { $regex: search, $options: "i" } }
       ];
+      if (query.$or) {
+        query.$and = [{ $or: query.$or }, { $or: searchConditions }];
+        delete query.$or;
+      } else {
+        query.$or = searchConditions;
+      }
     }
 
     const rides = await ScheduleRide.find(query).sort({ createdAt: -1 }).lean();
@@ -262,11 +285,72 @@ exports.dispatchScheduleRide = async (req, res) => {
       console.warn("Failed saving customer notification for dispatched schedule ride:", notifErr.message);
     }
 
+    // Persist DriverNotification for Dispatched Schedule Ride
     try {
+      const DriverNotification = require("../schema/DriverNotification");
+      const driverNotif = {
+        driverId: driverId || "",
+        driverName: assignedName || "Assigned Driver",
+        driverReferenceId: driverId || "",
+        rideId: updated.requestId,
+        requestId: updated.requestId,
+        mongoId: updated._id ? updated._id.toString() : updated.requestId,
+        notificationId: `${updated.requestId}_ASSIGNED`,
+        title: "🚗 New Schedule Ride Dispatched!",
+        subtitle: `Admin assigned schedule ride ${updated.requestId} (${updated.passengerName || "Customer"}) to you. Tap to view ride details.`,
+        status: "ASSIGNED",
+        type: "NEW_ASSIGNMENT",
+        customerName: updated.passengerName || "Customer",
+        customerPhone: updated.passengerPhone || "",
+        pickup: updated.pickupLocation || "Pickup Point",
+        destination: updated.dropoffLocation || "Destination Point",
+        fareFormatted: updated.fare ? `Rs. ${Number(updated.fare).toLocaleString()}` : "Rs. 7,500",
+        payload: updated,
+        isRead: false,
+        isDismissed: false
+      };
+      await DriverNotification.findOneAndUpdate(
+        { notificationId: `${updated.requestId}_ASSIGNED` },
+        driverNotif,
+        { upsert: true, new: true }
+      );
+
       const io = req.app.get("io");
       if (io) {
+        const fullPayload = {
+          ...driverNotif,
+          ride: updated,
+          data: updated,
+          payload: updated
+        };
+
+        const targetRooms = [
+          `driver-${driverId}`,
+          `driver_${driverId}`,
+          String(driverId)
+        ];
+        if (assignedName) {
+          targetRooms.push(`driver-${assignedName}`);
+          targetRooms.push(`driver_${assignedName}`);
+          targetRooms.push(assignedName);
+        }
+
+        targetRooms.forEach(room => {
+          io.to(room).emit("new-assignment", fullPayload);
+          io.to(room).emit("ride-assigned", fullPayload);
+          io.to(room).emit("ride-dispatched", fullPayload);
+          io.to(room).emit("new-notification", fullPayload);
+          io.to(room).emit("driver-notification", fullPayload);
+        });
+
+        io.emit("new-assignment", fullPayload);
+        io.emit("ride-assigned", fullPayload);
+        io.emit("ride-dispatched", fullPayload);
+        io.emit("new-notification", fullPayload);
+        io.emit("driver-notification", fullPayload);
         io.emit("schedule-ride-dispatched", updated);
         io.emit("schedule-ride-update", { type: "SCHEDULE_RIDE_DISPATCHED", ride: updated });
+        io.emit("ride-updated", { type: "RIDE_DISPATCHED", ride: updated, notification: driverNotif });
         io.emit("ride_accepted", {
           requestId: updated.requestId,
           customerId: updated.customerId,
@@ -279,9 +363,11 @@ exports.dispatchScheduleRide = async (req, res) => {
             vehicle: "Assigned Vehicle"
           }
         });
-        console.log("📡 Real-time event emitted: schedule-ride-dispatched", updated.requestId);
+        console.log("📡 Real-time events emitted for schedule ride dispatch:", updated.requestId);
       }
-    } catch (socketErr) {}
+    } catch (driverNotifErr) {
+      console.warn("Failed saving driver notification for dispatched schedule ride:", driverNotifErr.message);
+    }
 
     return res.status(200).json({
       success: true,
@@ -307,7 +393,17 @@ exports.updateScheduleRide = async (req, res) => {
     if (!ride) ride = await ScheduleRide.findOne({ requestId: rideId }).catch(() => null);
     if (!ride) return res.status(404).json({ success: false, message: `Schedule ride ${rideId} not found` });
 
-    if (fare !== undefined) ride.fare = Number(fare);
+    const isFareUpdated = (fare !== undefined && fare !== null && !isNaN(Number(fare)) && Number(fare) >= 0 && (Number(fare) !== Number(ride.fare) || status === "PRICE_UPDATED" || req.body.fareStatus === "PRICE_UPDATED"));
+    if (isFareUpdated) {
+      ride.fare = Number(fare);
+      if (!status || status === "PRICE_UPDATED") {
+        if (ride.status !== "COMPLETED" && ride.status !== "Completed" && ride.status !== "PAID") {
+          ride.status = "PRICE_UPDATED";
+        }
+      }
+      ride.fareResponseStatus = "Pending";
+      ride.fareStatus = "PRICE_UPDATED";
+    }
     if (status) ride.status = status;
     if (notes !== undefined) ride.notes = notes;
     const targetDriverId = driverId || ride.assignedDriverId;
@@ -377,6 +473,46 @@ exports.updateScheduleRide = async (req, res) => {
       driverDetails: driverDetails,
       driver: driverDetails
     };
+
+
+    // Persist CustomerNotification for Schedule Ride Fare Update
+    if (isFareUpdated && ride.status !== "COMPLETED" && ride.status !== "Completed") {
+      try {
+        const fareFormatted = `Rs. ${Number(ride.fare || 0).toLocaleString()}`;
+        const notifId = `${ride.requestId}_price_updated`;
+
+        await CustomerNotification.findOneAndUpdate(
+          { notificationId: notifId },
+          {
+            customerId: ride.customerId || ride.passengerPhone,
+            passengerPhone: ride.passengerPhone,
+            passengerEmail: ride.passengerEmail || "",
+            rideId: ride.requestId,
+            mongoId: ride._id ? ride._id.toString() : ride.requestId,
+            notificationId: notifId,
+            title: "💰 Ride Price Updated!",
+            subtitle: `Admin has updated your scheduled ride fare to ${fareFormatted}. Tap to review and accept.`,
+            status: "PRICE_UPDATED",
+            fareResponseStatus: "Pending",
+            fareFormatted: fareFormatted,
+            pickup: ride.pickupLocation || "Pickup Point",
+            destination: ride.dropoffLocation || "Destination Point",
+            driverName: driverDetails ? driverDetails.name : "",
+            driverPhone: driverDetails ? driverDetails.phone : "",
+            driverCode: driverDetails ? driverDetails.driverCode : "",
+            rating: driverDetails ? driverDetails.rating : "",
+            vehicle: driverDetails ? driverDetails.vehicle : "",
+            numberPlate: driverDetails ? driverDetails.numberPlate : "",
+            isRead: false,
+            isDismissed: false
+          },
+          { upsert: true, new: true }
+        );
+        console.log(`✅ CustomerNotification [PRICE_UPDATED] saved for schedule ride ${ride.requestId}: ${fareFormatted}`);
+      } catch (fareNotifErr) {
+        console.warn("Failed saving customer notification for updated schedule fare:", fareNotifErr.message);
+      }
+    }
 
     // Persist CustomerNotification for Driver Accepted or Assigned (ONLY Driver Details)
     if (ride.status === "ACCEPTED" || ride.status === "Accepted" || ride.status === "ASSIGNED") {
@@ -455,6 +591,29 @@ exports.updateScheduleRide = async (req, res) => {
       } catch (notifErr) {
         console.warn("Failed saving customer notification for completed schedule ride:", notifErr.message);
       }
+        // Store / ensure payment record in Payment History (collection: payments)
+        try {
+          const Payment = require("../schema/Payment");
+          const fareStr = notifyPayload.fareFormatted || (ride.fare ? `Rs. ${Number(ride.fare).toLocaleString()}` : "Rs. 0");
+          await Payment.findOneAndUpdate(
+            { rideId: ride.requestId },
+            {
+              customerId: ride.customerId || null,
+              customerName: ride.passengerName || "Customer",
+              customerPhone: ride.passengerPhone || "",
+              rideId: ride.requestId,
+              fare: fareStr,
+              pickup: ride.pickupLocation || "",
+              destination: ride.dropoffLocation || "",
+              driverName: driverDetails.name || "",
+              status: ride.isPaid ? "PAID" : "PENDING PAYMENT"
+            },
+            { upsert: true, new: true }
+          );
+          console.log(`✅ Payment record stored in Payment History for schedule ride ${ride.requestId}: ${fareStr}`);
+        } catch (paySaveErr) {
+          console.warn("Notice saving payment record for completed schedule ride:", paySaveErr.message);
+        }
     }
 
     try {
@@ -469,6 +628,37 @@ exports.updateScheduleRide = async (req, res) => {
           io.emit("ride_completed", notifyPayload);
           io.emit("ride-completed", notifyPayload);
           console.log(`📡 Real-time event [ride_completed] emitted for ${ride.requestId}`);
+        }
+        if (isFareUpdated && ride.status !== "COMPLETED") {
+          const farePayload = {
+            ...notifyPayload,
+            type: "PRICE_UPDATED",
+            status: "PRICE_UPDATED",
+            fareUpdated: true,
+            fareResponseStatus: "Pending",
+            title: "💰 Ride Price Updated!",
+            subtitle: `Admin has set your ride price to ${notifyPayload.fareFormatted}.`
+          };
+          const custId = ride.customerId ? String(ride.customerId) : "";
+          const custPhone = ride.passengerPhone ? String(ride.passengerPhone) : "";
+          const rId = String(ride.requestId);
+
+          if (custId) {
+            io.to(`customer_${custId}`).emit("ride-updated", farePayload);
+            io.to(`customer_${custId}`).emit("fare-updated", farePayload);
+            io.to(`customer_${custId}`).emit("customer-notification", farePayload);
+          }
+          if (custPhone) {
+            io.to(`customer_${custPhone}`).emit("ride-updated", farePayload);
+            io.to(`customer_${custPhone}`).emit("fare-updated", farePayload);
+            io.to(`customer_${custPhone}`).emit("customer-notification", farePayload);
+          }
+          io.to(`ride_${rId}`).emit("ride-updated", farePayload);
+          io.to(`ride_${rId}`).emit("fare-updated", farePayload);
+          io.emit("ride-updated", farePayload);
+          io.emit("fare-updated", farePayload);
+          io.emit("customer-notification", farePayload);
+          console.log(`📡 Real-time fare update emitted to customer for schedule ride ${rId}: ${notifyPayload.fareFormatted}`);
         }
         io.emit("schedule-ride-updated", notifyPayload);
         // Also emit ride-updated so customer app can catch fare update

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'ride_management_screen.dart'; // To access RideInfo
+import 'ride_management_screen.dart';
+import '../common/ride_navigation_screen.dart'; // To access RideInfo
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '/api_config.dart';
@@ -24,11 +25,73 @@ class RideDetailsScreen extends StatefulWidget {
 
 class _RideDetailsScreenState extends State<RideDetailsScreen> {
   bool _isLoading = false;
+  late RideInfo _ride;
+
+  @override
+  void initState() {
+    super.initState();
+    _ride = widget.ride;
+    _fetchLiveDetailsIfNeeded();
+  }
+
+  Future<void> _fetchLiveDetailsIfNeeded() async {
+    final bool needsPickup = _ride.pickup.isEmpty || _ride.pickup.trim().toLowerCase() == 'pickup location';
+    final bool needsDrop = _ride.drop.isEmpty || _ride.drop.trim().toLowerCase() == 'drop-off location';
+    final bool needsDropTime = _ride.dropoffTime.isEmpty || _ride.dropoffTime.trim().toLowerCase() == 'tbd';
+
+    if (!needsPickup && !needsDrop && !needsDropTime) return;
+
+    try {
+      final targetId = _ride.requestId.isNotEmpty ? _ride.requestId : _ride.id;
+      if (targetId.isEmpty) return;
+
+      final res = await http.get(Uri.parse('$kBaseUrl/api/rides/$targetId')).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        Map<String, dynamic>? data;
+        if (body is Map) {
+          if (body['ride'] is Map) {
+            data = Map<String, dynamic>.from(body['ride']);
+          } else if (body['data'] is Map) {
+            data = Map<String, dynamic>.from(body['data']);
+          } else {
+            data = Map<String, dynamic>.from(body);
+          }
+        }
+
+        if (data != null && mounted) {
+          final p = (data['pickupLocation'] ?? data['pickup'] ?? '').toString().trim();
+          final d = (data['dropoffLocation'] ?? data['dropLocation'] ?? data['drop'] ?? '').toString().trim();
+          final pTime = (data['timeToReach'] ?? data['pickupTime'] ?? data['timeSlot'] ?? '').toString().trim();
+          final dTime = (data['timeToLeave'] ?? data['dropoffTime'] ?? '').toString().trim();
+          final sType = (data['scheduleType'] ?? '').toString().trim();
+
+          setState(() {
+            _ride = _ride.copyWith(
+              pickup: (needsPickup && p.isNotEmpty && p.toLowerCase() != 'pickup location') ? p : _ride.pickup,
+              drop: (needsDrop && d.isNotEmpty && d.toLowerCase() != 'drop-off location') ? d : _ride.drop,
+              pickupTime: pTime.isNotEmpty ? pTime : _ride.pickupTime,
+              dropoffTime: dTime.isNotEmpty ? dTime : _ride.dropoffTime,
+              scheduleType: sType.isNotEmpty ? sType : _ride.scheduleType,
+            );
+          });
+        }
+      }
+    } catch (_) {}
+  }
 
   Future<void> _handleAction(String action) async {
     setState(() => _isLoading = true);
     try {
-      final endpoint = '$kBaseUrl/api/rides/status/${widget.ride.id}';
+      final rideIdentifier = _ride.requestId.isNotEmpty ? _ride.requestId : _ride.id;
+      String endpoint = '$kBaseUrl/api/rides/status/$rideIdentifier';
+      if (rideIdentifier.startsWith('SCH-')) {
+        endpoint = '$kBaseUrl/api/schedule-rides/$rideIdentifier';
+      } else if (rideIdentifier.startsWith('TT-')) {
+        endpoint = '$kBaseUrl/api/travel-requests/$rideIdentifier';
+      } else if (rideIdentifier.startsWith('HDR-') || rideIdentifier.startsWith('HIR-')) {
+        endpoint = '$kBaseUrl/api/driver-hire/$rideIdentifier';
+      }
       final response = await http.put(
         Uri.parse(endpoint),
         headers: {'Content-Type': 'application/json'},
@@ -61,7 +124,7 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
   Widget build(BuildContext context) {
     Color statusColor;
     String statusLabel;
-    switch (widget.ride.status.toUpperCase()) {
+    switch (_ride.status.toUpperCase()) {
       case 'ASSIGNED':
         statusColor = const Color(0xFFD97706);
         statusLabel = 'New Request';
@@ -92,7 +155,7 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
         break;
       default:
         statusColor = const Color(0xFF6B7280);
-        statusLabel = widget.ride.status;
+        statusLabel = _ride.status;
     }
 
     return Scaffold(
@@ -147,7 +210,7 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
                     const SizedBox(width: 14),
                     Expanded(
                       child: Text(
-                        widget.ride.name,
+                        _ride.name,
                         style: GoogleFonts.inter(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
@@ -159,7 +222,7 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          widget.ride.phone,
+                          _ride.phone,
                           style: GoogleFonts.inter(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -169,7 +232,7 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
                         const SizedBox(width: 6),
                         InkWell(
                           onTap: () {
-                            Clipboard.setData(ClipboardData(text: widget.ride.phone));
+                            Clipboard.setData(ClipboardData(text: _ride.phone));
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
                                 content: Text('Phone number copied to clipboard!'),
@@ -194,7 +257,7 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
               const SizedBox(height: 16),
 
               // Monthly Pass Badge
-              if (widget.ride.scheduleType.isNotEmpty)
+              if (_ride.scheduleType.isNotEmpty)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
@@ -206,11 +269,11 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        widget.ride.scheduleType.toUpperCase() == 'HIRE DRIVER'
+                        _ride.scheduleType.toUpperCase() == 'HIRE DRIVER'
                             ? Icons.person_outline
-                            : (widget.ride.scheduleType.toUpperCase() == 'TRAVEL & TOURISM'
+                            : (_ride.scheduleType.toUpperCase() == 'TRAVEL & TOURISM'
                                 ? Icons.luggage
-                                : (widget.ride.scheduleType.toUpperCase() == 'SCHEDULE RIDE'
+                                : (_ride.scheduleType.toUpperCase() == 'SCHEDULE RIDE'
                                     ? Icons.access_time_filled
                                     : Icons.star)),
                         color: const Color(0xFF1D4ED8),
@@ -218,7 +281,7 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        widget.ride.scheduleType.toUpperCase(),
+                        _ride.scheduleType.toUpperCase(),
                         style: GoogleFonts.inter(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
@@ -288,9 +351,9 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
                         Expanded(
                           child: Column(
                             children: [
-                              _buildLocationBox('Pickup Point', widget.ride.pickup),
+                              _buildLocationBox('Pickup Point', _ride.pickup),
                               const SizedBox(height: 12),
-                              _buildLocationBox('Drop Point', widget.ride.drop),
+                              _buildLocationBox('Drop Point', _ride.drop),
                             ],
                           ),
                         ),
@@ -301,11 +364,11 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
                     Row(
                       children: [
                         Expanded(
-                          child: _buildTimeBox('Pickup Time', widget.ride.pickupTime.isNotEmpty ? widget.ride.pickupTime : widget.ride.scheduledTime.isNotEmpty ? widget.ride.scheduledTime : 'ASAP'),
+                          child: _buildTimeBox('Pickup Time', _ride.pickupTime.isNotEmpty ? _ride.pickupTime : _ride.scheduledTime.isNotEmpty ? _ride.scheduledTime : 'ASAP'),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: _buildTimeBox('Est. Drop Time', widget.ride.dropoffTime.isNotEmpty ? widget.ride.dropoffTime : 'TBD'),
+                          child: _buildTimeBox('Est. Drop Time', _ride.dropoffTime.isNotEmpty ? _ride.dropoffTime : 'TBD'),
                         ),
                       ],
                     ),
@@ -476,12 +539,55 @@ class _RideDetailsScreenState extends State<RideDetailsScreen> {
         ],
       );
     } else if (widget.tabType == 'assigned') {
-      final status = widget.ride.status.toUpperCase();
-      if (status == 'ACCEPTED') {
-        return _buildFullWidthButton('Start Trip', const Color(0xFF1959F6), () => _handleAction('IN_TRANSIT'));
-      } else if (status == 'IN_TRANSIT') {
-        return _buildFullWidthButton('Complete Trip', const Color(0xFF16A34A), () => _handleAction('COMPLETED'));
-      }
+      final status = _ride.status.toUpperCase();
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => RideNavigationScreen(
+                      rideId: _ride.id,
+                      pickupAddress: _ride.pickup,
+                      dropoffAddress: _ride.drop,
+                      passengerName: _ride.name,
+                      passengerPhone: _ride.phone,
+                      driverName: 'Driver',
+                      isDriver: true,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.navigation_outlined, size: 18),
+              label: Text(
+                'Open Navigation Map',
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF1959F6),
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF1959F6),
+                side: const BorderSide(color: Color(0xFF1959F6)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (status == 'ACCEPTED')
+            _buildFullWidthButton('Start Trip', const Color(0xFF1959F6), () => _handleAction('IN_TRANSIT'))
+          else if (status == 'IN_TRANSIT')
+            _buildFullWidthButton('Complete Trip', const Color(0xFF16A34A), () => _handleAction('COMPLETED'))
+          else
+            _buildFullWidthButton('Back to Ride Management', const Color(0xFF1959F6), () => Navigator.pop(context)),
+        ],
+      );
     }
     
     // Default / Completed / Cancelled state

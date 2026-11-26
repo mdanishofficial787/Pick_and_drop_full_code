@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'edit_profile_screen.dart';
+import 'driver_ride_history_screen.dart';
 import '../welcome_screen.dart';
 
 import 'dart:convert';
@@ -218,7 +219,16 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                     iconBgColor: const Color(0xFFEFF6FF),
                     iconColor: const Color(0xFF1959F6),
                     title: 'Ride History',
-                    onTap: () {},
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => DriverRideHistoryScreen(
+                            driverId: widget.driverId ?? '',
+                            driverName: currentDriverName,
+                          ),
+                        ),
+                      );
+                    },
                     showDivider: true,
                   ),
                   _buildMenuItem(

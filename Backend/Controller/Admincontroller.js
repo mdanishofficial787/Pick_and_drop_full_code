@@ -1,5 +1,6 @@
 ﻿const Driver = require("../schema/Driver");
 const Vehicle = require("../schema/Vehicle");
+const IssueReport = require("../schema/IssueReport");
 
 // ======================================================
 // 1. GET ALL PENDING DRIVERS
@@ -671,6 +672,104 @@ exports.exportVehiclesCSV = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Failed to export vehicles",
+            error: error.message,
+        });
+    }
+};
+
+
+// ======================================================
+// 13. ISSUE REPORTS - GET ALL
+// ======================================================
+exports.getAllIssueReports = async (req, res) => {
+    try {
+        const { status, page = 1, limit = 20 } = req.query;
+        const filter = {};
+        if (status && ["Pending", "In Review", "Resolved", "Dismissed"].includes(status)) {
+            filter.status = status;
+        }
+        const reports = await IssueReport.find(filter)
+            .populate("driver", "Name PhoneNumber driverReferenceId")
+            .sort({ createdAt: -1 })
+            .limit(Number(limit))
+            .skip((Number(page) - 1) * Number(limit))
+            .lean();
+        const total = await IssueReport.countDocuments(filter);
+        return res.status(200).json({
+            success: true,
+            count: reports.length,
+            total,
+            page: Number(page),
+            pages: Math.ceil(total / Number(limit)),
+            reports,
+        });
+    } catch (error) {
+        console.error("Get Issue Reports Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch issue reports",
+            error: error.message,
+        });
+    }
+};
+
+// ======================================================
+// 14. ISSUE REPORTS - GET BY ID
+// ======================================================
+exports.getIssueReportById = async (req, res) => {
+    try {
+        const report = await IssueReport.findById(req.params.id)
+            .populate("driver", "Name PhoneNumber driverReferenceId")
+            .lean();
+        if (!report) {
+            return res.status(404).json({ success: false, message: "Report not found" });
+        }
+        return res.status(200).json({ success: true, report });
+    } catch (error) {
+        console.error("Get Issue Report By ID Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch report",
+            error: error.message,
+        });
+    }
+};
+
+// ======================================================
+// 15. ISSUE REPORTS - UPDATE STATUS
+// ======================================================
+exports.updateIssueReportStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status, remarks } = req.body;
+        const allowedStatuses = ["Pending", "In Review", "Resolved", "Dismissed"];
+        if (!allowedStatuses.includes(status)) {
+            return res.status(400).json({ success: false, message: "Invalid status value" });
+        }
+        const updateData = { status };
+        if (remarks) updateData.remarks = remarks;
+        if (status === "Resolved") updateData.resolvedAt = new Date();
+        const report = await IssueReport.findByIdAndUpdate(
+            id,
+            { $set: updateData },
+            { new: true }
+        ).populate("driver", "Name PhoneNumber");
+        if (!report) {
+            return res.status(404).json({ success: false, message: "Report not found" });
+        }
+        // Emit socket event so connected admin clients update in real-time
+        const io = req.app.get("io");
+        if (io) io.emit("issue_report_updated", report);
+        return res.status(200).json({
+            success: true,
+            message: "Issue report status updated",
+            report,
+        });
+    } catch (error) {
+        console.error("Update Issue Report Status Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update report status",
             error: error.message,
         });
     }

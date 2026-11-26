@@ -346,9 +346,20 @@ class _MonthlyPickupScreenState extends State<MonthlyPickupScreen> {
       return;
     }
 
+    if (_pickupController.text.trim().toLowerCase() == _dropoffController.text.trim().toLowerCase()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Pickup and Drop-off locations cannot be identical'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isSubmitting = true);
 
     try {
+      _currentUser ??= await AuthService.getCurrentUser();
       final rawPhone = _currentUser?.phoneNumber?.trim();
       final rawName = _currentUser?.fullName.trim();
       final passengerName = (rawName != null && rawName.isNotEmpty) ? rawName : 'Customer User';

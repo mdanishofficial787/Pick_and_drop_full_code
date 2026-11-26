@@ -9,7 +9,7 @@ class ApiConstants {
   static const bool useLiveBackend = false;
 
   // Your PC's Local Network IP (allows physical mobile connected via USB / Wi-Fi to reach Backend)
-  static const String serverIp = '192.168.88.87';
+  static const String serverIp = '192.168.88.95';
   static const String serverPort = '3000';
 
   // Optional manual override if needed
@@ -56,6 +56,9 @@ class ApiConstants {
   static String get vehicleRegister => '$baseUrl/vehicle/register';
   static String get driverPreferredRoutes => '$baseUrl/driver/preferred-routes';
   static String get driverAvailability => '$baseUrl/driver/availability';
+  static String getDriverRideHistory(String driverId, {String timeframe = 'all', String status = 'all'}) =>
+      '$baseUrl/api/rides/driver/$driverId/history?timeframe=$timeframe&status=$status';
+  static String getDriverRides(String driverId) => '$baseUrl/api/rides/driver/$driverId';
 
   // Ride & Monthly Booking Endpoints
   static String get createMonthlyRide => '$baseUrl/api/rides/monthly';

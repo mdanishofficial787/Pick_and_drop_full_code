@@ -347,6 +347,46 @@ class _CustomerPaymentHistoryScreenState extends State<CustomerPaymentHistoryScr
                     ],
                   ),
 
+                  // Pay Now action if pending payment
+                  if (status.toUpperCase().contains('PENDING PAYMENT') || status.toUpperCase() == 'UNPAID') ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1959F6),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          elevation: 0,
+                        ),
+                        icon: const Icon(Icons.payment_rounded, color: Colors.white, size: 16),
+                        label: Text(
+                          'PAY NOW',
+                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white),
+                        ),
+                        onPressed: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => PaymentDetailsScreen(
+                                rideData: {
+                                  'id': rideId,
+                                  'requestId': rideId,
+                                  'fareFormatted': fare,
+                                  'fare': fare,
+                                  'pickup': payment['pickup'] ?? '',
+                                  'destination': payment['destination'] ?? '',
+                                  'driverName': payment['driverName'] ?? '',
+                                },
+                              ),
+                            ),
+                          );
+                          _fetchHistoryData();
+                        },
+                      ),
+                    ),
+                  ],
+
                   // Remarks (if any)
                   if (remarks.isNotEmpty) ...[
                     const SizedBox(height: 10),
@@ -460,13 +500,23 @@ class _CustomerPaymentHistoryScreenState extends State<CustomerPaymentHistoryScr
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        requestId,
-                        style: GoogleFonts.inter(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: const Color(0xFF0F172A),
-                        ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            requestId,
+                            style: GoogleFonts.inter(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: const Color(0xFF0F172A),
+                            ),
+                          ),
+                          if (date.isNotEmpty)
+                            Text(
+                              date,
+                              style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF94A3B8)),
+                            ),
+                        ],
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -551,6 +601,11 @@ class _CustomerPaymentHistoryScreenState extends State<CustomerPaymentHistoryScr
                               driverName,
                               style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF1E293B)),
                             ),
+                            if (driverPhone.isNotEmpty)
+                              Text(
+                                driverPhone,
+                                style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF64748B)),
+                              ),
                           ],
                         ),
                     ],

@@ -26,3 +26,6 @@ Frontend/android/app/release/
 .DS_Store
 
 scratch/
+
+**/ephemeral/
+Frontend/config/old_api_config.dart

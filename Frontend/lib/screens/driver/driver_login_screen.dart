@@ -148,6 +148,15 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
           await prefs.setString('saved_driver_id$keySuffix', driverId);
           await prefs.setString('driver_id', driverId);
         }
+        final String? driverRefId = driverObj['driverReferenceId']?.toString() ??
+            driverObj['driverCode']?.toString() ??
+            driverData['driverReferenceId']?.toString() ??
+            driverData['driverCode']?.toString();
+        if (driverRefId != null && driverRefId.isNotEmpty) {
+          await prefs.setString('saved_driver_reference_id$keySuffix', driverRefId);
+          await prefs.setString('driver_reference_id', driverRefId);
+          await prefs.setString('driver_code', driverRefId);
+        }
         if (profilePic != null && profilePic.isNotEmpty) {
           await prefs.setString('saved_driver_photo$keySuffix', profilePic);
           await prefs.setString('driver_photo', profilePic);

@@ -272,13 +272,121 @@ exports.updateTravelRequest = async (req, res) => {
     if (!request) request = await TravelTourismRequest.findOne({ requestId: reqId }).catch(() => null);
     if (!request) return res.status(404).json({ success: false, message: `Travel request ${reqId} not found` });
 
-    if (fare !== undefined) request.fare = Number(fare);
+    const isFareUpdated = (fare !== undefined && fare !== null && !isNaN(Number(fare)) && Number(fare) >= 0 && (Number(fare) !== Number(request.fare) || status === "PRICE_UPDATED" || req.body.fareStatus === "PRICE_UPDATED"));
+    if (isFareUpdated) {
+      request.fare = Number(fare);
+      if (!status || status === "PRICE_UPDATED") {
+        if (request.status !== "COMPLETED" && request.status !== "Completed" && request.status !== "PAID") {
+          request.status = "PRICE_UPDATED";
+        }
+      }
+      request.fareResponseStatus = "Pending";
+      request.fareStatus = "PRICE_UPDATED";
+    }
     if (status) request.status = status;
     if (notes !== undefined) request.notes = notes;
     if (driverId) request.assignedDriverId = driverId;
     if (driverName) request.assignedDriverName = driverName;
 
     await request.save();
+
+    // Persist CustomerNotification & Payment if COMPLETED
+    if (request.status === "COMPLETED" || request.status === "Completed") {
+      try {
+        const Payment = require("../schema/Payment");
+        const numericFare = Number(request.fare || 0);
+        await Payment.findOneAndUpdate(
+          { rideId: request.requestId || request._id.toString() },
+          {
+            $setOnInsert: {
+              rideId: request.requestId || request._id.toString(),
+              paymentProofUrl: "",
+              paymentProofId: "",
+              uploadedAt: new Date(),
+            },
+            $set: {
+              customerId: request.customerId || null,
+              customerName: request.passengerName || "Customer",
+              customerPhone: request.passengerPhone || "",
+              customerEmail: request.passengerEmail || "",
+              pickup: request.pickupLocation || "",
+              destination: request.destination || request.dropoffLocation || "",
+              driverName: request.assignedDriverName || "Driver",
+              fare: numericFare,
+              amount: numericFare,
+              status: "PENDING PAYMENT",
+            }
+          },
+          { upsert: true, new: true }
+        );
+        console.log(`✅ Auto-created Payment record (PENDING PAYMENT) for completed travel request ${request.requestId}`);
+      } catch (payErr) {
+        console.warn("Auto-create Payment record on travel completion error:", payErr.message);
+      }
+
+      try {
+        const CustomerNotification = require("../schema/CustomerNotification");
+        const numericFare = Number(request.fare || 0);
+        const fareFormatted = `Rs. ${numericFare.toLocaleString()}`;
+        const notifId = `${request.requestId}_completed`;
+
+        await CustomerNotification.findOneAndUpdate(
+          { notificationId: notifId },
+          {
+            customerId: request.customerId || request.passengerPhone,
+            passengerPhone: request.passengerPhone,
+            passengerEmail: request.passengerEmail || "",
+            rideId: request.requestId,
+            mongoId: request._id ? request._id.toString() : request.requestId,
+            notificationId: notifId,
+            title: "💳 Ride Completed - Pay Fare",
+            subtitle: `Your travel tour has ended. Please tap to pay ${fareFormatted} to complete your ride.`,
+            status: "COMPLETED",
+            fareResponseStatus: "Pending Payment",
+            fareFormatted: fareFormatted,
+            pickup: request.pickupLocation || "Pickup Point",
+            destination: request.destination || request.dropoffLocation || "Destination Point",
+            isRead: false,
+            isDismissed: false
+          },
+          { upsert: true, new: true }
+        );
+      } catch (notifErr) {
+        console.warn("Failed saving customer notification for completed travel ride:", notifErr.message);
+      }
+    }
+    if (isFareUpdated && request.status !== "COMPLETED") {
+      try {
+        const CustomerNotification = require("../schema/CustomerNotification");
+        const fareFormatted = `Rs. ${Number(request.fare || 0).toLocaleString()}`;
+        const notifId = `${request.requestId}_price_updated`;
+
+        await CustomerNotification.findOneAndUpdate(
+          { notificationId: notifId },
+          {
+            customerId: request.customerId || request.passengerPhone,
+            passengerPhone: request.passengerPhone,
+            passengerEmail: request.passengerEmail || "",
+            rideId: request.requestId,
+            mongoId: request._id ? request._id.toString() : request.requestId,
+            notificationId: notifId,
+            title: "💰 Ride Price Updated!",
+            subtitle: `Admin has updated your travel tour fare to ${fareFormatted}. Tap to review and accept.`,
+            status: "PRICE_UPDATED",
+            fareResponseStatus: "Pending",
+            fareFormatted: fareFormatted,
+            pickup: request.pickupLocation || "Pickup Point",
+            destination: request.destination || request.dropoffLocation || "Destination Point",
+            isRead: false,
+            isDismissed: false
+          },
+          { upsert: true, new: true }
+        );
+        console.log(`✅ CustomerNotification [PRICE_UPDATED] saved for travel request ${request.requestId}: ${fareFormatted}`);
+      } catch (fareNotifErr) {
+        console.warn("Failed saving customer notification for updated travel fare:", fareNotifErr.message);
+      }
+    }
 
     const notifyPayload = {
       requestId: request.requestId,
@@ -294,6 +402,70 @@ exports.updateTravelRequest = async (req, res) => {
     try {
       const io = req.app.get("io");
       if (io) {
+        if (isFareUpdated && request.status !== "COMPLETED") {
+          const farePayload = {
+            ...notifyPayload,
+            type: "PRICE_UPDATED",
+            status: "PRICE_UPDATED",
+            fareUpdated: true,
+            fareResponseStatus: "Pending",
+            title: "💰 Ride Price Updated!",
+            subtitle: `Admin has updated your tour fare to ${notifyPayload.fareFormatted}.`
+          };
+          const custId = request.customerId ? String(request.customerId) : "";
+          const custPhone = request.passengerPhone ? String(request.passengerPhone) : "";
+          const rId = String(request.requestId);
+
+          if (custId) {
+            io.to(`customer_${custId}`).emit("ride-updated", farePayload);
+            io.to(`customer_${custId}`).emit("fare-updated", farePayload);
+            io.to(`customer_${custId}`).emit("customer-notification", farePayload);
+          }
+          if (custPhone) {
+            io.to(`customer_${custPhone}`).emit("ride-updated", farePayload);
+            io.to(`customer_${custPhone}`).emit("fare-updated", farePayload);
+            io.to(`customer_${custPhone}`).emit("customer-notification", farePayload);
+          }
+          io.to(`ride_${rId}`).emit("ride-updated", farePayload);
+          io.to(`ride_${rId}`).emit("fare-updated", farePayload);
+          io.emit("ride-updated", farePayload);
+          io.emit("fare-updated", farePayload);
+          io.emit("customer-notification", farePayload);
+          console.log(`📡 Real-time fare update emitted to customer for travel request ${rId}: ${notifyPayload.fareFormatted}`);
+        }
+        if (request.status === "COMPLETED" || request.status === "Completed") {
+          const completedPayload = {
+            ...notifyPayload,
+            type: "COMPLETED",
+            status: "COMPLETED",
+            fareFormatted: notifyPayload.fareFormatted,
+            fare: request.fare,
+            pickup: request.pickupLocation,
+            destination: request.destination || request.dropoffLocation,
+            title: "💳 Ride Completed - Pay Fare",
+            subtitle: `Your travel tour has ended. Please tap to pay ${notifyPayload.fareFormatted} to complete your ride.`
+          };
+          const custId = request.customerId ? String(request.customerId) : "";
+          const custPhone = request.passengerPhone ? String(request.passengerPhone) : "";
+          const rId = String(request.requestId);
+
+          if (custId) {
+            io.to(`customer_${custId}`).emit("ride-completed", completedPayload);
+            io.to(`customer_${custId}`).emit("ride-updated", completedPayload);
+            io.to(`customer_${custId}`).emit("customer-notification", completedPayload);
+          }
+          if (custPhone) {
+            io.to(`customer_${custPhone}`).emit("ride-completed", completedPayload);
+            io.to(`customer_${custPhone}`).emit("ride-updated", completedPayload);
+            io.to(`customer_${custPhone}`).emit("customer-notification", completedPayload);
+          }
+          io.to(`ride_${rId}`).emit("ride-completed", completedPayload);
+          io.to(`ride_${rId}`).emit("ride-updated", completedPayload);
+          io.emit("ride-completed", completedPayload);
+          io.emit("ride-updated", completedPayload);
+          io.emit("customer-notification", completedPayload);
+          console.log(`📡 Real-time ride-completed emitted for travel request ${rId}`);
+        }
         io.emit("travel-request-updated", notifyPayload);
         io.emit("ride-updated", { ...notifyPayload, id: request.requestId });
         console.log(`ðŸ“¡ Emitted [travel-request-updated] for ${request.requestId}`);
